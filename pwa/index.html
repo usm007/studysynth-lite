@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>StudySynth — Offline Study Workspace</title>
+  <meta name="description" content="State-of-the-art offline study workspace, deterministic question generator, and competitive exam simulator.">
+  <meta name="theme-color" content="#3943d3">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/png" href="./assets/favicon.png">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+  <!-- ======================================================================
+       STUDYSYNTH MAIN WORKSPACE SHELL
+       ====================================================================== -->
+  <div id="appShell" style="display:flex; flex-direction:column; height:100%; width:100%;">
+    
+    <!-- TOP BAR -->
+    <header class="topbar">
+      <div class="topbar-in">
+        <div class="brand" id="brandLogo">
+          <img src="./assets/logo.png" alt="StudySynth Logo" class="brand-mark" style="object-fit:contain; background:transparent; box-shadow:none;">
+          <div>
+            <div class="brand-name">StudySynth</div>
+            <div class="brand-sub">Offline Study Workspace</div>
+          </div>
+        </div>
+
+        <div class="set-title">
+          <b id="setTitle">10 QUESTIONS</b>
+          <span id="setTopic">SPM IAS Academy — 19 Oct 2026</span>
+        </div>
+
+        <div class="progress-wrap">
+          <span id="progNum" class="progress-num">1/10</span>
+          <div class="progress-bar"><i id="progBar" style="width:10%;"></i></div>
+          <span id="progPct" class="progress-pct">10%</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button id="installBadge" class="install-badge" title="Install StudySynth App for Android / Desktop">
+            <span class="install-icon">📲</span>
+            <span class="install-text">Install App</span>
+          </button>
+          <button id="themeToggle" class="iconbtn" title="Toggle Dark/Light Mode" aria-label="Toggle Theme">☀️</button>
+          <button id="printBtn" class="iconbtn" title="Print A4 Test Booklet">🖨️</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN SHELL -->
+    <div class="shell">
+      
+      <!-- LEFT RAIL: MODES & STATS -->
+      <aside class="rail">
+        <div class="rail-sec-title">Study Modes</div>
+        <div class="mode-list">
+          <button class="mode-item active" data-mode="practice">
+            <span style="font-size:16px;">💡</span>
+            <div>
+              <b>Practice</b>
+              <small>Instant feedback & citation</small>
+            </div>
+          </button>
+          <button class="mode-item" data-mode="test">
+            <span style="font-size:16px;">⏱️</span>
+            <div>
+              <b>Exam Test</b>
+              <small>Timed evaluation</small>
+            </div>
+          </button>
+          <button class="mode-item" data-mode="revision">
+            <span style="font-size:16px;">📇</span>
+            <div>
+              <b>Revision</b>
+              <small>Active recall flashcards</small>
+            </div>
+          </button>
+          <button class="mode-item" data-mode="generator">
+            <span style="font-size:16px;">⚡</span>
+            <div>
+              <b>Generator</b>
+              <small>Extract from notes / PDF</small>
+            </div>
+          </button>
+          <button class="mode-item" data-mode="library">
+            <span style="font-size:16px;">📚</span>
+            <div>
+              <b>Library</b>
+              <small>Saved offline tests</small>
+            </div>
+          </button>
+        </div>
+
+        <!-- Inline Confidence Meter -->
+        <div class="conf-meter">
+          <div style="display:flex; justify-content:space-between; align-items:baseline;">
+            <span style="font-size:10px; font-weight:800; text-transform:uppercase; color:var(--muted);">Session Score</span>
+            <span id="railAcc" class="cm-pct" style="color:var(--good);">0%</span>
+          </div>
+          <div class="cm-bar"><i id="railBar" style="width:0%;"></i></div>
+          <span id="railSub" class="cm-sub">0 answered of 10</span>
+        </div>
+
+        <div class="rail-foot">
+          <div>Status: <strong style="color:var(--good);">100% Offline</strong></div>
+          <div style="margin-top:4px; font-size:10.5px; color:var(--muted);">Zero-LLM • Deterministic</div>
+        </div>
+      </aside>
+
+      <!-- CENTER WORKSPACE -->
+      <main class="workspace">
+        <div class="workcol">
+          <div id="qwork">
+
+            <!-- QUIZ VIEW -->
+            <div id="quizView" style="display:flex; flex-direction:column; flex:1; min-height:0;">
+              
+              <div class="sheet-head">
+                <div id="sheetNum" class="sheet-num">Q 01</div>
+                <div class="sheet-id">
+                  <span id="sheetModeLabel" class="sheet-mode">Practice Mode</span>
+                  <span id="sheetContext" class="sheet-ctx">Indian Polity • Supreme Court</span>
+                </div>
+                <button id="markBtn" class="btn" style="min-height:30px; padding:3px 10px; font-size:11.5px;">☆ Bookmark</button>
+              </div>
+
+              <!-- Exam Mode Strip -->
+              <div class="exam-strip">
+                <div>Exam Timer: <span id="examTimer" class="t">00:00</span></div>
+                <div style="margin-left:auto; font-size:11px; color:#cbd5e1;">Marking: +2.00 / -0.66</div>
+              </div>
+
+              <div class="sheet-body">
+                <div id="questionContainer">
+                  <!-- Dynamic Question Content -->
+                </div>
+              </div>
+
+              <div class="actions">
+                <button id="prevBtn" class="btn">← Previous</button>
+                <div class="spacer"></div>
+                <button id="nextBtn" class="btn btn-primary">Next Question →</button>
+                <button id="submitBtn" class="btn btn-primary" style="background:var(--good); border-color:var(--good); display:none;">Submit Test ✓</button>
+              </div>
+
+            </div>
+
+            <!-- GENERATOR VIEW -->
+            <div id="generatorView" style="display:none; padding:24px; overflow-y:auto; flex:1;">
+              <h2 style="font-size:20px; font-weight:800; margin-bottom:6px;">Deterministic Question Generator</h2>
+              <p style="color:var(--muted); font-size:13px; margin-bottom:20px;">
+                Extracts knowledge units and synthesizes competitive MCQs directly on your device in &lt;200ms.
+              </p>
+
+              <div id="dropZone" style="border:2px dashed var(--line-strong); background:var(--surface-2); border-radius:14px; padding:32px 20px; text-align:center; cursor:pointer;">
+                <div style="font-size:36px; margin-bottom:10px;">📄</div>
+                <h3 style="font-size:16px; font-weight:700;">Drop Study Document, Selectable PDF, or Note Photo</h3>
+                <p style="color:var(--muted); font-size:12.5px; margin-top:4px;">Supports .pdf, .txt, .md, and camera photos (.jpg, .png)</p>
+                <input type="file" id="fileInput" accept=".pdf,.txt,.md,.json,.jpg,.jpeg,.png,.webp" style="display:none;">
+              </div>
+
+              <div style="margin-top:16px;">
+                <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Module Title:</label>
+                <input type="text" id="docTitle" placeholder="e.g. SPM IAS Academy — 19 Oct 2026" style="width:100%; padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); font:inherit; margin-top:6px;">
+              </div>
+
+              <div style="margin-top:14px;">
+                <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Or Paste Extracted Notes / Text:</label>
+                <textarea id="docText" rows="6" placeholder="Paste news analysis, syllabus topics, lecture notes or legal articles here..." style="width:100%; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); font:inherit; margin-top:6px; resize:vertical;"></textarea>
+              </div>
+
+              <div style="margin-top:16px;">
+                <span style="font-size:12px; color:var(--muted);">Quick 1-Click Samples:</span>
+                <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                  <button id="chipDemoSpm" class="btn btn-sm" type="button">🗞️ SPM IAS Newspaper (19 Oct 2026)</button>
+                  <button id="chipDemoScience" class="btn btn-sm" type="button">🚀 Chandrayaan-3 Mission Notes</button>
+                </div>
+              </div>
+
+              <button id="generateBtn" class="btn btn-primary" type="button" style="width:100%; margin-top:20px; padding:13px; font-size:15px;">
+                ⚡ Generate Offline Quiz & Study Package
+              </button>
+            </div>
+
+            <!-- REVISION / FLASHCARD VIEW -->
+            <div id="revisionView" style="display:none; padding:24px; text-align:center; flex:1; flex-direction:column; justify-content:center;">
+              <span id="flashcardCount" style="font-size:12px; color:var(--muted); font-weight:700; text-transform:uppercase;">Card 1 of 10</span>
+              <div id="flashcardBox" style="margin:24px auto; max-width:600px; width:100%; min-height:220px; background:var(--surface-2); border:1px solid var(--line); border-radius:16px; padding:30px; display:flex; flex-direction:column; justify-content:center; align-items:center; cursor:pointer; box-shadow:var(--shadow-sm);">
+                <!-- Dynamic Flashcard Content -->
+              </div>
+              <div style="display:flex; justify-content:center; gap:12px;">
+                <button id="prevCardBtn" class="btn">← Previous Card</button>
+                <button id="nextCardBtn" class="btn btn-primary">Next Card →</button>
+              </div>
+            </div>
+
+            <!-- LIBRARY VIEW -->
+            <div id="libraryView" style="display:none; padding:24px; overflow-y:auto; flex:1;">
+              <h2 style="font-size:20px; font-weight:800; margin-bottom:6px;">Offline Library</h2>
+              <p style="color:var(--muted); font-size:13px; margin-bottom:16px;">Persisted indefinitely in your device's IndexedDB.</p>
+              <div id="libraryContainer"></div>
+            </div>
+
+          </div>
+        </div>
+      </main>
+
+      <!-- RIGHT LIVEBAR: ANALYTICS (Desktop) -->
+      <aside class="livebar">
+        <div class="live-acc">
+          <div id="liveAccNum" class="live-acc-v" style="color:var(--accent);">0%</div>
+          <div class="live-acc-s">Live Accuracy</div>
+        </div>
+
+        <div class="live-grid">
+          <div class="live-stat good">
+            <b id="statCorrect">0</b>
+            <span>Correct</span>
+          </div>
+          <div class="live-stat bad">
+            <b id="statWrong">0</b>
+            <span>Wrong</span>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <span style="font-size:10px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted);">Question Palette</span>
+          <div id="livePalette" class="palette-grid"></div>
+        </div>
+      </aside>
+
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="toast">Action completed</div>
+
+  <!-- Offline Scripts -->
+  <script src="./sample_data.js"></script>
+  <script src="./engine/generator.js"></script>
+  <script src="./engine/pdfParser.js"></script>
+  <script src="./engine/ocr.js"></script>
+  <script src="./engine/storage.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "confusion_type": {
+      "enum": [
+        "adjacent_date",
+        "adjacent_value",
+        "causal_reversal",
+        "near_synonym",
+        "overgeneralization",
+        "partial_truth",
+        "plausible_external",
+        "reversed_causality",
+        "reversed_relation",
+        "scope_error",
+        "wrong_article",
+        "wrong_category",
+        "wrong_date",
+        "wrong_entity",
+        "wrong_person",
+        "wrong_place"
+      ],
+      "type": "string"
+    },
+    "distractor_origin": {
+      "enum": [
+        "source_ku",
+        "external"
+      ],
+      "type": "string"
+    },
+    "is_correct": {
+      "type": "boolean"
+    },
+    "key": {
+      "enum": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F"
+      ],
+      "type": "string"
+    },
+    "ku_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "covers": {
+      "items": {
+        "minimum": 1,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "distractor_purpose": {
+      "enum": [
+        "confusable_fact",
+        "adjacent_value",
+        "partial_truth",
+        "reversed_relation",
+        "wrong_category",
+        "wrong_entity",
+        "wrong_date",
+        "scope_error",
+        "causal_reversal",
+        null
+      ],
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "key",
+    "text",
+    "is_correct",
+    "distractor_origin",
+    "confusion_type",
+    "ku_ref"
+  ],
+  "type": "object"
+}
