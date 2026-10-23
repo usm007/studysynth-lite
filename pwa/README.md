@@ -17,7 +17,7 @@ A fully standalone, zero-network, zero-LLM competitive exam study workspace and 
 2. **Offline Document Ingestion & Optional Local OCR (`engine/pdfParser.js` & `engine/ocr.js`):**
    - Parses Markdown (`.md`), plain text (`.txt`), JSON, and selectable PDFs (`.pdf`) with bundled PDF.js, falling back to a local stream extractor.
    - **Local On-Device OCR:** Includes an in-browser Web Worker OCR engine with Otsu adaptive binarization for scanned PDFs and textbook camera photos (`.jpg`, `.png`, `.webp`). OCR runs offline when the Tesseract runtime and English language data (`vendor/tesseract/eng.traineddata`) are present. Without that data file, the app reports a clear "OCR unavailable" message and text-based ingestion still works.
-   - Includes 1-click preloaded demos (SPM IAS Academy Newspaper Analysis 19 Oct 2026 and Chandrayaan-3 Mission notes).
+   - The Library starts empty. Add a PDF, a note photo, or pasted notes to build your first set; a bundled sample corpus (`sample_data.js`) is shipped only for the engine tests.
 
 3. **Android PWA Ready (`manifest.webmanifest` & `sw.js`):**
    - Service Worker precaches all app assets on initial load.
@@ -56,7 +56,7 @@ studysynth-pwa/
 ├── index.html               # Main PWA application shell & UI
 ├── styles.css               # Glassmorphic responsive styling & @media print A4 booklet CSS
 ├── app.js                   # Application controller & state management
-├── sample_data.js           # Preloaded offline study materials
+├── sample_data.js           # Bundled sample corpus used by the engine tests
 ├── sw.js                    # Service worker implementing Cache-First offline strategy
 ├── manifest.webmanifest     # Android PWA install configuration
 ├── engine/

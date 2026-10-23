@@ -7,11 +7,11 @@
   'use strict';
 
   const MODE_LABELS = {
-    practice: 'Practice Mode',
-    test: 'Exam Test (Timed)',
-    revision: 'Adaptive Revision',
+    practice: 'Practice',
+    test: 'Exam Test',
+    revision: 'Revision',
     generator: 'Generator',
-    library: 'Offline Library'
+    library: 'Library'
   };
 
   const MARKS_CORRECT = 2;
@@ -50,7 +50,6 @@
     },
     storagePersistent: false,
     isNative: false,
-    swControllerReloaded: false,
     navOpen: false,
     sourceMeta: null
   };
@@ -79,8 +78,7 @@
     DOM.railAccLabel = document.getElementById('railAccLabel');
     DOM.railBar = document.getElementById('railBar');
     DOM.railSub = document.getElementById('railSub');
-    DOM.netStatus = document.getElementById('netStatus');
-    DOM.cacheStatus = document.getElementById('cacheStatus');
+    DOM.aboutBtn = document.getElementById('aboutBtn');
 
     DOM.quizView = document.getElementById('quizView');
     DOM.generatorView = document.getElementById('generatorView');
@@ -118,8 +116,6 @@
     DOM.fileStatus = document.getElementById('fileStatus');
     DOM.docTitle = document.getElementById('docTitle');
     DOM.docText = document.getElementById('docText');
-    DOM.chipDemoSpm = document.getElementById('chipDemoSpm');
-    DOM.chipDemoScience = document.getElementById('chipDemoScience');
     DOM.generateBtn = document.getElementById('generateBtn');
 
     DOM.revisionUnavailable = document.getElementById('revisionUnavailable');
@@ -127,7 +123,6 @@
     DOM.revisionSession = document.getElementById('revisionSession');
     DOM.revisionSummary = document.getElementById('revisionSummary');
     DOM.revDashTitle = document.getElementById('revDashTitle');
-    DOM.revDashTopic = document.getElementById('revDashTopic');
     DOM.revResetBtn = document.getElementById('revResetBtn');
     DOM.revStatDue = document.getElementById('revStatDue');
     DOM.revStatNew = document.getElementById('revStatNew');
@@ -149,7 +144,6 @@
     DOM.revEvidenceShort = document.getElementById('revEvidenceShort');
     DOM.revEvidenceFull = document.getElementById('revEvidenceFull');
     DOM.revEvidenceToggle = document.getElementById('revEvidenceToggle');
-    DOM.revRecallHint = document.getElementById('revRecallHint');
     DOM.revRevealBtn = document.getElementById('revRevealBtn');
     DOM.revBackBtn = document.getElementById('revBackBtn');
     DOM.revPrevBtn = document.getElementById('revPrevBtn');
@@ -179,6 +173,9 @@
     DOM.scoreReviewBtn = document.getElementById('scoreReviewBtn');
     DOM.scoreRetakeBtn = document.getElementById('scoreRetakeBtn');
     DOM.scoreCloseBtn = document.getElementById('scoreCloseBtn');
+
+    DOM.aboutModal = document.getElementById('aboutModal');
+    DOM.aboutCloseBtn = document.getElementById('aboutCloseBtn');
 
     DOM.processModal = document.getElementById('processModal');
     DOM.processTitle = document.getElementById('processTitle');
@@ -238,10 +235,6 @@
     if (!DOM.fileStatus) return;
     DOM.fileStatus.textContent = message || '';
     DOM.fileStatus.className = 'file-status' + (type ? ' ' + type : '');
-  }
-
-  function setCacheStatus(message) {
-    if (DOM.cacheStatus) DOM.cacheStatus.textContent = message;
   }
 
   function isNativeApp() {
@@ -388,7 +381,7 @@
     if (DOM.installBadge) {
       DOM.installBadge.addEventListener('click', async () => {
         if (isStandalone()) {
-          showToast('StudySynth is already installed and runs fully offline.');
+          showToast('StudySynth is already installed.');
           return;
         }
 
@@ -417,19 +410,12 @@
   function registerServiceWorker() {
     // The Android build ships its assets inside the APK, so a service worker
     // would only add a stale-cache layer. Keep updates deterministic.
-    if (State.isNative) {
-      setCacheStatus('Bundled app · fully offline');
-      return;
-    }
-    if (!('serviceWorker' in navigator) || location.protocol === 'file:') {
-      setCacheStatus('Local app · no server needed');
-      return;
-    }
+    if (State.isNative) return;
+    if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
 
     window.addEventListener('load', async () => {
       try {
         const registration = await navigator.serviceWorker.register('./sw.js');
-        setCacheStatus('Offline cache ready');
 
         if (registration.waiting && navigator.serviceWorker.controller) {
           showToast('A new StudySynth version is ready. Reopen the app to update.');
@@ -447,25 +433,14 @@
 
         // Look for updates when the app is opened, but never block startup.
         setTimeout(() => registration.update().catch(() => {}), 2500);
-
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (!State.swControllerReloaded && navigator.serviceWorker.controller) {
-            State.swControllerReloaded = true;
-            setCacheStatus('Offline cache updated');
-          }
-        });
       } catch (err) {
-        setCacheStatus('Offline cache unavailable');
         console.warn('StudySynth service worker registration failed:', err);
       }
     });
   }
 
   async function requestPersistentStorage() {
-    if (State.isNative) {
-      setCacheStatus('Bundled app · fully offline');
-      return;
-    }
+    if (State.isNative) return;
     if (!navigator.storage || typeof navigator.storage.persist !== 'function') return;
     try {
       const already = typeof navigator.storage.persisted === 'function'
@@ -473,30 +448,9 @@
         : false;
       const granted = already || await navigator.storage.persist();
       State.storagePersistent = !!granted;
-      if (granted) setCacheStatus('Offline cache ready · protected');
     } catch (e) {
       // Storage persistence is best-effort, not required for the app to work.
     }
-  }
-
-  function updateNetworkStatus() {
-    const online = navigator.onLine !== false;
-    document.body.classList.toggle('is-online', online);
-    if (DOM.netStatus) {
-      DOM.netStatus.textContent = online ? 'Online · local engine' : 'Offline · 100% local';
-    }
-  }
-
-  function initNetworkStatus() {
-    updateNetworkStatus();
-    window.addEventListener('online', () => {
-      updateNetworkStatus();
-      showToast('Connection restored. StudySynth still runs locally.');
-    });
-    window.addEventListener('offline', () => {
-      updateNetworkStatus();
-      showToast('You are offline. Everything keeps working.');
-    });
   }
 
   // ==========================================================================
@@ -603,7 +557,7 @@
     setNavOpen(false, { returnFocus: wasNavOpen });
 
     if (mode === 'library' || mode === 'generator') {
-      if (DOM.setTitle) DOM.setTitle.textContent = 'OFFLINE LIBRARY';
+      if (DOM.setTitle) DOM.setTitle.textContent = 'LIBRARY';
       if (DOM.setTopic) DOM.setTopic.textContent = 'Choose a PDF or saved set';
     } else if (State.currentModule) {
       const activeCount = Array.isArray(State.currentModule.questions) ? State.currentModule.questions.length : 0;
@@ -777,7 +731,7 @@
     updateStats();
     if (!questionCount) {
       if (DOM.qContainer) {
-        DOM.qContainer.innerHTML = '<div class="empty-state"><strong>This set is revision-only.</strong><br>No question passed every source-verification check. Open Revision to study the preserved knowledge units, or add clearer source text and generate again.</div>';
+        DOM.qContainer.innerHTML = '<div class="empty-state"><strong>This set is revision-only.</strong><br>No question passed source verification. Open Revision to study it, or add clearer source text and generate again.</div>';
       }
       if (DOM.answerPanel) DOM.answerPanel.innerHTML = '';
       if (DOM.progNum) DOM.progNum.textContent = '0/0';
@@ -1153,6 +1107,20 @@
     if (DOM.submitBtn) DOM.submitBtn.focus();
   }
 
+  function openAbout() {
+    if (!DOM.aboutModal) return;
+    DOM.aboutModal.classList.add('open');
+    if (DOM.aboutCloseBtn) {
+      setTimeout(() => DOM.aboutCloseBtn.focus(), 30);
+    }
+  }
+
+  function closeAbout() {
+    if (!DOM.aboutModal) return;
+    DOM.aboutModal.classList.remove('open');
+    if (DOM.aboutBtn) DOM.aboutBtn.focus();
+  }
+
   // Android hardware/gesture back: close overlays, step back to the Library,
   // and only exit the app from the Library itself. Returns true when handled.
   function handleAndroidBack() {
@@ -1162,6 +1130,10 @@
     }
     if (DOM.scoreModal && DOM.scoreModal.classList.contains('open')) {
       closeScorecard();
+      return true;
+    }
+    if (DOM.aboutModal && DOM.aboutModal.classList.contains('open')) {
+      closeAbout();
       return true;
     }
     if (State.navOpen) {
@@ -1384,8 +1356,8 @@
     if (p.total && p.completed != null) return `${p.completed} of ${p.total} pages`;
     if (job.status === 'completed') return 'Completed';
     if (job.status === 'interrupted') return 'Paused';
-    if (!p.indeterminate && p.percent != null) return job.stage === 'ocr' ? 'Recognising text' : 'Working on this device';
-    return 'Working on this device';
+    if (!p.indeterminate && p.percent != null) return job.stage === 'ocr' ? 'Recognising text' : 'Working';
+    return 'Working';
   }
 
   function renderProcessStages(job) {
@@ -1443,7 +1415,7 @@
         : isRecovery ? 'Processing was interrupted'
           : isImport ? 'Preparing your document' : 'Preparing your study module';
     if (DOM.processTitle) DOM.processTitle.textContent = title;
-    if (DOM.processMessage) DOM.processMessage.textContent = job.message || 'Working on this device…';
+    if (DOM.processMessage) DOM.processMessage.textContent = job.message || 'Working…';
 
     if (DOM.processNotice) {
       let notice = '';
@@ -1513,7 +1485,7 @@
         const chipMeta = isRecovery ? (job.canResume ? 'Tap to resume' : 'Cannot resume')
           : isError ? 'Tap to review'
             : determinate ? (progress.total ? countText : `${progress.percent}% complete`)
-              : 'Working on this device';
+              : 'Working';
         if (DOM.processChipStage) DOM.processChipStage.textContent = chipStage;
         if (DOM.processChipMeta) DOM.processChipMeta.textContent = chipMeta;
         if (DOM.processChipPct) {
@@ -1559,7 +1531,7 @@
     const label = DOM.generateBtn.querySelector('.generate-label');
     const text = busy
       ? (type === 'import' ? 'Processing your document…' : 'Preparing your study module…')
-      : 'Generate Offline Quiz & Study Package';
+      : 'Generate Quiz & Study Package';
     if (label) label.textContent = text;
     else DOM.generateBtn.textContent = text;
   }
@@ -1588,7 +1560,7 @@
       setFileStatus(`Loaded ${fileName} · OCR confidence ${Math.round(detailed.confidence)}%. Review and correct the text before generating.`, 'error');
       showToast('Review the extracted OCR text before generating.');
     } else {
-      setFileStatus(`Loaded ${fileName} · ${text.length.toLocaleString()} characters extracted locally.`, 'ok');
+      setFileStatus(`Loaded ${fileName} · ${text.length.toLocaleString()} characters extracted.`, 'ok');
       showToast(`Loaded ${fileName}. Review the text, then generate.`);
     }
   }
@@ -1598,22 +1570,12 @@
     if (!module) return;
     completedModule = module;
     const questionCount = Array.isArray(module.questions) ? module.questions.length : 0;
-    const unitCount = Array.isArray(module.inventory) ? module.inventory.length : 0;
-    const validation = module.validation || {};
-    const rejected = validation.rejected || 0;
-    const rejectionSummary = Object.keys(validation.rejectionCounts || {})
-      .filter((key) => Number(validation.rejectionCounts[key]) > 0)
-      .map((key) => `${key.replace(/_/g, ' ')} (${validation.rejectionCounts[key]})`)
-      .slice(0, 4)
-      .join(', ');
 
     if (module.revisionOnly) {
-      setFileStatus('Revision only · no MCQ passed source verification. The knowledge units were saved for revision.', 'error');
+      setFileStatus('Revision only · no MCQ passed source verification. This set was saved for revision.', 'error');
       showToast('Saved for revision only. No verified MCQs were published.');
     } else {
-      const skipNote = rejected > 0 ? ` ${rejected} candidate${rejected === 1 ? '' : 's'} skipped.` : '';
-      const reasonNote = rejectionSummary ? ` Reasons: ${rejectionSummary}.` : '';
-      setFileStatus(`Ready · ${questionCount} verified question${questionCount === 1 ? '' : 's'} from ${unitCount} knowledge unit${unitCount === 1 ? '' : 's'} in ${module.durationMs} ms.${skipNote}${reasonNote}`, 'ok');
+      setFileStatus(`Ready · ${questionCount} verified question${questionCount === 1 ? '' : 's'}.`, 'ok');
       showToast(`Saved “${module.title}”. ${questionCount} verified question${questionCount === 1 ? '' : 's'} available.`);
     }
 
@@ -1632,7 +1594,7 @@
       processExpanded = false;
       if (Processing) Processing.dismiss();
       paintProcessing(null);
-      showToast('Processing cancelled. Your notes are still here.');
+      showToast('Processing cancelled.');
       return;
     }
     if (result.status === 'failed') {
@@ -1715,8 +1677,8 @@
   async function handleGenerate() {
     const text = (DOM.docText.value || '').trim();
     if (!text) {
-      setFileStatus('Add notes, a document, or a sample first.', 'error');
-      showToast('Please provide notes, text, or a document first.');
+      setFileStatus('Add notes or a document first.', 'error');
+      showToast('Please add notes, text, or a document first.');
       return;
     }
     if (text.length < 40) {
@@ -1738,7 +1700,7 @@
           'Have you reviewed the extracted text? Choose OK to use it as-is, or Cancel to keep editing first.'
         );
         if (!confirmNow) {
-          setFileStatus(`On-device OCR confidence is ${Math.round(sourceMeta.confidence || 0)}%. Review and correct the extracted text, or confirm it explicitly, before generating.`, 'error');
+          setFileStatus(`OCR confidence is ${Math.round(sourceMeta.confidence || 0)}%. Review and correct the extracted text, or confirm it explicitly, before generating.`, 'error');
           showToast('Low-confidence OCR needs your review before questions can be created.');
           return;
         }
@@ -1758,7 +1720,7 @@
       return;
     }
 
-    setFileStatus('Extracting source facts and verifying candidates…', '');
+    setFileStatus('Preparing questions…', '');
     processExpanded = true;
     completedModule = null;
     const started = Processing.startGeneration({
@@ -1873,7 +1835,7 @@
       }
     } catch (e) {
       State.revision.progress = {};
-      showToast('Revision progress could not be read on this device.');
+      showToast('Revision progress could not be read.');
     }
 
     const saved = await readRevisionSession(State.currentModule.id);
@@ -1895,7 +1857,6 @@
     const stats = engine.getModuleRevisionStats(items, State.revision.progress, now);
 
     if (DOM.revDashTitle) DOM.revDashTitle.textContent = mod.title || 'Revision';
-    if (DOM.revDashTopic) DOM.revDashTopic.textContent = 'Evidence-backed recall, scheduled on this device.';
     if (DOM.revStatDue) DOM.revStatDue.textContent = String(stats.due);
     if (DOM.revStatNew) DOM.revStatNew.textContent = String(stats.newItems);
     if (DOM.revStatLearning) DOM.revStatLearning.textContent = String(stats.learning);
@@ -1921,7 +1882,7 @@
 
     let note;
     if (startable === 0) {
-      note = 'Nothing is due right now. Every item you have reviewed is scheduled ahead; new items will appear here once you add content.';
+      note = 'Nothing is due right now.';
       if (stats.nextDueAt) {
         note = `Nothing is due right now. The next item returns ${formatRevisionWhen(stats.nextDueAt, now)}.`;
       }
@@ -1932,8 +1893,8 @@
       const parts = [];
       if (stats.due) parts.push(`${stats.due} due`);
       if (stats.newItems) parts.push(`${stats.newItems} new`);
-      note = `A session draws up to ${engine.DEFAULT_SESSION_SIZE} items, taking ${parts.join(' and ')} first, then long-interval items that are becoming stale.`;
-      if (stats.due === 0) note = `No item is due yet. A session will start with the ${stats.newItems} new item${stats.newItems === 1 ? '' : 's'}; already-reviewed items return when scheduled.`;
+      note = `A session draws up to ${engine.DEFAULT_SESSION_SIZE} items, taking ${parts.join(' and ')} first.`;
+      if (stats.due === 0) note = `No item is due yet. A session will start with the ${stats.newItems} new item${stats.newItems === 1 ? '' : 's'}.`;
     }
     if (DOM.revDashNote) DOM.revDashNote.textContent = note;
 
@@ -1958,7 +1919,7 @@
       if (session.completed) await window.OfflineStorage.deleteRevisionSession(session.moduleId);
       else await window.OfflineStorage.saveRevisionSession(session);
     } catch (e) {
-      showToast('This session could not be saved on this device.');
+      showToast('This session could not be saved.');
     }
   }
 
@@ -2055,7 +2016,6 @@
     if (DOM.revRatings) DOM.revRatings.hidden = !canRate;
     if (DOM.revRevealBtn) DOM.revRevealBtn.hidden = revealed;
     if (DOM.revBackBtn) DOM.revBackBtn.hidden = !viewingPrev;
-    if (DOM.revRecallHint) DOM.revRecallHint.hidden = revealed;
     if (DOM.revPrevBtn) DOM.revPrevBtn.hidden = viewingPrev || session.cursor === 0;
   }
 
@@ -2143,7 +2103,7 @@
       }
       await persistRevisionSession();
     } catch (e) {
-      showToast('This rating could not be saved on this device.');
+      showToast('This rating could not be saved.');
     } finally {
       State.revision.saving = false;
     }
@@ -2222,7 +2182,7 @@
         await window.OfflineStorage.deleteRevisionSession(mod.id);
       }
     } catch (e) {
-      showToast('Revision progress could not be cleared on this device.');
+      showToast('Revision progress could not be cleared.');
     }
     State.revision.progress = {};
     State.revision.session = null;
@@ -2282,7 +2242,7 @@
     const displayList = list.slice();
 
     if (!displayList.length) {
-      DOM.libraryContainer.innerHTML = '<div class="empty-state"><strong>No study sets yet.</strong><br>Add a PDF, note photo, or pasted notes to build your first offline set.</div>';
+      DOM.libraryContainer.innerHTML = '<div class="empty-state"><strong>No study sets yet.</strong><br>Add a PDF, note photo, or pasted notes to build your first set.</div>';
       return;
     }
 
@@ -2367,7 +2327,7 @@
             State.revision.viewingPrev = false;
           }
           renderLibrary();
-          showToast('Study set deleted from local storage.');
+          showToast('Study set deleted.');
         } catch (e) {
           showToast('The study set could not be deleted.');
         }
@@ -2398,8 +2358,7 @@
       return;
     }
 
-    setFileStatus(`Reading ${file.name} on this device…`, '');
-    showToast('Processing file offline…');
+    setFileStatus(`Reading ${file.name}…`, '');
     processExpanded = true;
     completedModule = null;
     const started = Processing.startImport({
@@ -2520,24 +2479,6 @@
       });
     }
 
-    if (DOM.chipDemoSpm) {
-      DOM.chipDemoSpm.addEventListener('click', () => {
-        State.sourceMeta = null;
-        DOM.docText.value = window.StudySamples.newspaper_2026;
-        DOM.docTitle.value = 'SPM IAS Academy — 19 Oct 2026';
-        handleGenerate();
-      });
-    }
-
-    if (DOM.chipDemoScience) {
-      DOM.chipDemoScience.addEventListener('click', () => {
-        State.sourceMeta = null;
-        DOM.docText.value = window.StudySamples.science_space;
-        DOM.docTitle.value = 'Chandrayaan-3 Mission Notes';
-        handleGenerate();
-      });
-    }
-
     if (DOM.generateBtn) DOM.generateBtn.addEventListener('click', handleGenerate);
 
     if (DOM.revStartBtn) DOM.revStartBtn.addEventListener('click', startRevisionSession);
@@ -2569,12 +2510,22 @@
       });
     }
 
+    if (DOM.aboutBtn) DOM.aboutBtn.addEventListener('click', openAbout);
+    if (DOM.aboutCloseBtn) DOM.aboutCloseBtn.addEventListener('click', closeAbout);
+    if (DOM.aboutModal) {
+      DOM.aboutModal.addEventListener('click', (e) => {
+        if (e.target === DOM.aboutModal) closeAbout();
+      });
+    }
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         if (DOM.processModal && DOM.processModal.classList.contains('open')) {
           closeProcessingDialog();
         } else if (DOM.scoreModal && DOM.scoreModal.classList.contains('open')) {
           closeScorecard();
+        } else if (DOM.aboutModal && DOM.aboutModal.classList.contains('open')) {
+          closeAbout();
         } else if (State.navOpen) {
           setNavOpen(false, { returnFocus: true });
         }
@@ -2617,7 +2568,6 @@
     initDOM();
     initNavigation();
     initInstallHandlers();
-    initNetworkStatus();
     initTheme();
     registerServiceWorker();
     initEvents();

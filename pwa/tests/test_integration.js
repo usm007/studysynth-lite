@@ -111,6 +111,21 @@ const sidebarCreditAt = html.indexOf('aria-label="With love, usm007"');
 const railEndAt = html.indexOf('</aside>');
 assert(sidebarCreditAt > 0 && sidebarCreditAt < railEndAt, 'Developer credit must live inside the sidebar only');
 assert(!/subtle-credit/.test(html), 'Developer credit must not be repeated in the workspace views');
+// About: a single entry above the sidebar credit, carrying the app summary and the developer credit.
+for (const id of ['aboutBtn', 'aboutModal', 'aboutTitle', 'aboutCloseBtn']) {
+  assert(new RegExp(`id=["']${id}["']`).test(html), `The About panel must expose #${id}`);
+}
+assert(html.indexOf('id="aboutBtn"') > 0 && html.indexOf('id="aboutBtn"') < railEndAt, 'The About entry must live in the sidebar');
+assert(html.indexOf('id="aboutModal"') > railEndAt, 'The About panel must live outside the sidebar');
+assert(/aria-label="Built by usm007"/.test(html), 'The About panel must credit the developer');
+// Meta filler that describes how the app is built must not surface in the interface.
+for (const filler of ['Quick 1-click samples', 'SPM IAS Newspaper', 'SPM IAS Academy', 'Chandrayaan-3 Mission Notes',
+  'Zero-LLM', 'Deterministic Question Generator', 'Saved on this device', 'How did you do?', 'On this device',
+  'crafted', 'adaptive revision engine']) {
+  assert(!html.includes(filler), `The interface must not contain "${filler}"`);
+}
+assert(!/chipDemo|StudySamples\.newspaper_2026|StudySamples\.science_space/.test(appJs), 'The quick sample chips must be removed from the controller');
+assert(!/Offline Library|Adaptive Revision|Working on this device/.test(appJs), 'Mode labels and status copy must stay short and direct');
 assert(!/starterModule|mod_starter_spm_2026|loadInitialModule/.test(appJs), 'The Library must not preload an example module');
 assert(!/Starter set/.test(appJs), 'The Library must not label an example module as a starter set');
 assert(!/mod\.bundled/.test(appJs) && !/\.library-card\.is-starter/.test(css), 'Bundled starter presentation must be removed');

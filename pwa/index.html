@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover, interactive-widget=resizes-content">
   <title>StudySynth — Offline Study Workspace</title>
-  <meta name="description" content="A fully offline, zero-LLM study workspace with a deterministic question generator, revision flashcards, and an exam simulator.">
+  <meta name="description" content="Turn your notes and PDFs into verified practice questions, adaptive revision, and timed exam tests — all on your device, fully offline.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#3943d3">
   <meta name="format-detection" content="telephone=no">
@@ -39,7 +39,7 @@
         </div>
 
         <div class="set-title">
-          <b id="setTitle">OFFLINE LIBRARY</b>
+          <b id="setTitle">LIBRARY</b>
           <span id="setTopic">Choose a PDF or saved set</span>
         </div>
 
@@ -118,12 +118,7 @@
         </div>
 
         <div class="rail-foot">
-          <div class="status-row">
-            <span id="netDot" class="status-dot" aria-hidden="true"></span>
-            <span id="netStatus">Offline · 100% local</span>
-          </div>
-          <div class="rail-meta">Zero-LLM · Deterministic</div>
-          <div id="cacheStatus" class="rail-meta">Preparing offline cache…</div>
+          <button id="aboutBtn" class="rail-about" type="button">About</button>
           <div class="credit" aria-label="With love, usm007">With <span class="credit-heart ms-icon" aria-hidden="true">favorite</span>, usm007</div>
         </div>
       </aside>
@@ -141,7 +136,6 @@
               <!-- Exam setup: shown before a timed test starts -->
               <section id="testSetup" class="test-setup" hidden aria-labelledby="testSetupTitle">
                 <div class="test-setup-card">
-                  <span class="test-kicker">Timed evaluation</span>
                   <h2 id="testSetupTitle">Start an exam test</h2>
                   <p id="testSetupModule" class="test-setup-module"></p>
                   <div class="test-setup-grid">
@@ -172,8 +166,8 @@
               <div class="sheet-head">
                 <div id="sheetNum" class="sheet-num">Q 01</div>
                 <div class="sheet-id">
-                  <span id="sheetModeLabel" class="sheet-mode">Practice Mode</span>
-                  <span id="sheetContext" class="sheet-ctx">Indian Polity • Supreme Court</span>
+                  <span id="sheetModeLabel" class="sheet-mode">Practice</span>
+                  <span id="sheetContext" class="sheet-ctx"></span>
                 </div>
                 <button id="markBtn" class="btn bookmark-btn" type="button" aria-pressed="false"><span class="ms-icon bookmark-icon" aria-hidden="true">star</span><span class="bookmark-text">Bookmark</span></button>
               </div>
@@ -209,10 +203,8 @@
               <div class="view-inner">
                 <div class="view-heading">
                   <div>
-                    <h2>Deterministic Question Generator</h2>
-                    <p>Extracts knowledge units and synthesizes competitive MCQs directly on your device in under 200 ms.</p>
+                    <h2>Question Generator</h2>
                   </div>
-                  <span class="offline-pill">100% on-device</span>
                 </div>
 
                 <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Choose a study document or note photo">
@@ -226,27 +218,18 @@
 
                 <div class="field-group">
                   <label for="docTitle">Module title</label>
-                  <input type="text" id="docTitle" placeholder="e.g. SPM IAS Academy — 19 Oct 2026" autocomplete="off">
+                  <input type="text" id="docTitle" placeholder="e.g. Biology — Chapter 4" autocomplete="off">
                 </div>
 
                 <div class="field-group">
                   <label for="docText">Or paste extracted notes / text</label>
-                  <textarea id="docText" rows="6" placeholder="Paste news analysis, syllabus topics, lecture notes, or legal articles here…"></textarea>
-                </div>
-
-                <div class="samples">
-                  <span class="samples-label">Quick 1-click samples:</span>
-                  <div class="sample-buttons">
-                    <button id="chipDemoSpm" class="btn btn-sm" type="button"><span class="ms-icon" aria-hidden="true">newspaper</span><span>SPM IAS Newspaper (19 Oct 2026)</span></button>
-                    <button id="chipDemoScience" class="btn btn-sm" type="button"><span class="ms-icon" aria-hidden="true">rocket_launch</span><span>Chandrayaan-3 Mission Notes</span></button>
-                  </div>
+                  <textarea id="docText" rows="6" placeholder="Paste your notes here…"></textarea>
                 </div>
 
                 <button id="generateBtn" class="btn btn-primary generate-btn" type="button">
                   <span class="ms-icon" aria-hidden="true">bolt</span>
-                  <span class="generate-label">Generate Offline Quiz &amp; Study Package</span>
+                  <span class="generate-label">Generate Quiz &amp; Study Package</span>
                 </button>
-                <p class="generator-note">Nothing leaves this device. Generation is deterministic, so the same notes always produce the same quiz.</p>
               </div>
             </div>
 
@@ -260,9 +243,7 @@
                 <section id="revisionDashboard" class="rev-panel" hidden>
                   <div class="rev-head">
                     <div class="rev-head-copy">
-                      <span class="rev-kicker">Adaptive revision</span>
                       <h2 id="revDashTitle">Revision</h2>
-                      <p id="revDashTopic" class="rev-sub">Evidence-backed recall, scheduled on this device.</p>
                     </div>
                     <button id="revResetBtn" class="btn btn-sm rev-reset" type="button">Reset progress</button>
                   </div>
@@ -281,7 +262,6 @@
                     <button id="revStartBtn" class="btn btn-primary rev-start" type="button">Start revision</button>
                     <button id="revResumeBtn" class="btn rev-resume" type="button" hidden>Resume session</button>
                   </div>
-                  <p class="rev-hint">Ratings are saved on this device the moment you choose them. Nothing is uploaded.</p>
                 </section>
 
                 <!-- Session -->
@@ -308,8 +288,6 @@
                     </div>
                   </article>
 
-                  <p id="revRecallHint" class="rev-recall-hint">Try to recall the answer before revealing it.</p>
-
                   <div class="rev-controls">
                     <button id="revRevealBtn" class="btn btn-primary rev-reveal" type="button">Reveal answer</button>
                     <button id="revBackBtn" class="btn rev-back" type="button" hidden>Back to current card</button>
@@ -317,7 +295,6 @@
                   </div>
 
                   <div id="revRatings" class="rev-ratings" role="group" aria-label="How well did you recall this?" hidden>
-                    <span class="rev-ratings-label">How did you do?</span>
                     <div class="rev-rating-row">
                       <button class="btn rev-rate rev-rate-again" type="button" data-rating="again"><b>Again</b><small>Couldn’t recall</small></button>
                       <button class="btn rev-rate rev-rate-hard" type="button" data-rating="hard"><b>Hard</b><small>Took effort</small></button>
@@ -329,7 +306,6 @@
 
                 <!-- Summary -->
                 <section id="revisionSummary" class="rev-panel rev-summary" hidden>
-                  <span class="rev-kicker">Session complete</span>
                   <h2 id="revSummaryTitle">Session complete</h2>
                   <div class="rev-summary-grid">
                     <div><b id="revSumReviewed">0</b><span>Reviewed</span></div>
@@ -353,13 +329,10 @@
               <div class="view-inner">
                 <div class="view-heading">
                   <div>
-                    <h2>Offline Library</h2>
-                    <p>Every PDF and saved set stays on this device. Choose Practice, Revision, or Exam Test for the set you want to study.</p>
+                    <h2>Library</h2>
                   </div>
-                  <span class="offline-pill">On this device</span>
                 </div>
                 <div class="library-toolbar">
-                  <span class="library-toolbar-label">Saved on this device</span>
                   <button id="libraryGenerateBtn" class="btn btn-sm" type="button"><span class="ms-icon" aria-hidden="true">add</span><span>Add PDF or notes</span></button>
                 </div>
                 <div id="libraryContainer"></div>
@@ -401,7 +374,7 @@
       <span class="process-chip-icon" aria-hidden="true"><span class="ms-icon">progress_activity</span></span>
       <span class="process-chip-copy">
         <b id="processChipStage">Preparing…</b>
-        <small id="processChipMeta">On this device</small>
+        <small id="processChipMeta">Working</small>
       </span>
       <span id="processChipPct" class="process-chip-pct" hidden>0%</span>
       <span class="process-chip-open ms-icon" aria-hidden="true">open_in_full</span>
@@ -412,7 +385,6 @@
   <div id="processModal" class="modal process-modal" role="dialog" aria-modal="true" aria-labelledby="processTitle" aria-describedby="processMessage">
     <div class="modal-card process-card">
       <div class="process-head">
-        <span class="process-kicker">On this device</span>
         <h2 id="processTitle">Preparing your study module</h2>
         <p id="processMessage" class="process-message">Opening your document…</p>
         <p id="processNotice" class="process-notice" hidden></p>
@@ -423,7 +395,7 @@
           <i id="processBar" class="process-bar"></i>
         </div>
         <div class="process-meta">
-          <span id="processCount">Working on this device</span>
+          <span id="processCount">Working</span>
           <span id="processPct" class="process-pct" hidden>0%</span>
         </div>
       </div>
@@ -448,7 +420,6 @@
   <div id="scoreModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="scoreTitle">
     <div class="modal-card">
       <div class="score-hero">
-        <span class="score-kicker">Exam complete</span>
         <strong id="scoreTitle" class="score-value">0.00</strong>
         <span id="scoreMax" class="score-max">out of 20.00</span>
         <span id="scoreBand" class="score-band">Keep practising</span>
@@ -465,6 +436,19 @@
         <button id="scoreRetakeBtn" class="btn btn-primary" type="button">Retake test</button>
       </div>
       <button id="scoreCloseBtn" class="modal-close" type="button" aria-label="Close scorecard"><span class="ms-icon" aria-hidden="true">close</span></button>
+    </div>
+  </div>
+
+  <!-- About -->
+  <div id="aboutModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+    <div class="modal-card about-card">
+      <img src="./assets/logo.png" alt="" class="about-mark">
+      <h2 id="aboutTitle" class="about-title">StudySynth</h2>
+      <p class="about-summary">Turn your notes and PDFs into verified practice questions, adaptive revision, and timed exam tests. Everything runs on your device, fully offline.</p>
+      <p class="about-credit" aria-label="Built by usm007">Built with <span class="credit-heart ms-icon" aria-hidden="true">favorite</span> by usm007</p>
+      <div class="modal-actions">
+        <button id="aboutCloseBtn" class="btn btn-primary" type="button">Close</button>
+      </div>
     </div>
   </div>
 
