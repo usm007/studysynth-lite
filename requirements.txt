@@ -1,0 +1,5 @@
+# StudySynth Lite Python pipeline dependencies
+pypdf>=6.0
+openpyxl>=3.1
+reportlab>=4.0
+pytest>=8.0

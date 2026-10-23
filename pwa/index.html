@@ -2,30 +2,37 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover, interactive-widget=resizes-content">
   <title>StudySynth — Offline Study Workspace</title>
-  <meta name="description" content="State-of-the-art offline study workspace, deterministic question generator, and competitive exam simulator.">
+  <meta name="description" content="A fully offline, zero-LLM study workspace with a deterministic question generator, revision flashcards, and an exam simulator.">
+  <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#3943d3">
+  <meta name="format-detection" content="telephone=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="StudySynth">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" type="image/png" href="./assets/favicon.png">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./styles.css">
 </head>
-<body>
+<body data-mode="library">
+
+  <a class="skip-link" href="#qwork">Skip to study workspace</a>
 
   <!-- ======================================================================
        STUDYSYNTH MAIN WORKSPACE SHELL
        ====================================================================== -->
-  <div id="appShell" style="display:flex; flex-direction:column; height:100%; width:100%;">
-    
+  <div id="appShell" class="app-shell">
+
     <!-- TOP BAR -->
     <header class="topbar">
       <div class="topbar-in">
+        <button id="navToggle" class="iconbtn nav-toggle" type="button" aria-label="Open navigation" aria-controls="appRail" aria-expanded="false"><span class="ms-icon" aria-hidden="true">menu</span></button>
+
         <div class="brand" id="brandLogo">
-          <img src="./assets/logo.png" alt="StudySynth Logo" class="brand-mark" style="object-fit:contain; background:transparent; box-shadow:none;">
-          <div>
+          <img src="./assets/logo.png" alt="StudySynth" class="brand-mark">
+          <div class="brand-text">
             <div class="brand-name">StudySynth</div>
             <div class="brand-sub">Offline Study Workspace</div>
           </div>
@@ -36,82 +43,92 @@
           <span id="setTopic">SPM IAS Academy — 19 Oct 2026</span>
         </div>
 
-        <div class="progress-wrap">
+        <div class="progress-wrap" aria-label="Question progress">
           <span id="progNum" class="progress-num">1/10</span>
-          <div class="progress-bar"><i id="progBar" style="width:10%;"></i></div>
+          <div class="progress-bar" aria-hidden="true"><i id="progBar" style="width:10%;"></i></div>
           <span id="progPct" class="progress-pct">10%</span>
         </div>
 
-        <div style="display:flex; align-items:center; gap:8px;">
-          <button id="installBadge" class="install-badge" title="Install StudySynth App for Android / Desktop">
-            <span class="install-icon">📲</span>
+        <div class="topbar-actions">
+          <button id="installBadge" class="install-badge" title="Install StudySynth for offline use" aria-label="Install StudySynth app">
+            <span class="install-icon ms-icon" aria-hidden="true">install_mobile</span>
             <span class="install-text">Install App</span>
           </button>
-          <button id="themeToggle" class="iconbtn" title="Toggle Dark/Light Mode" aria-label="Toggle Theme">☀️</button>
-          <button id="printBtn" class="iconbtn" title="Print A4 Test Booklet">🖨️</button>
+          <button id="themeToggle" class="iconbtn" title="Toggle dark or light mode" aria-label="Toggle dark or light mode"><span class="ms-icon" aria-hidden="true">dark_mode</span></button>
+          <button id="printBtn" class="iconbtn" title="Print A4 test booklet" aria-label="Print test booklet"><span class="ms-icon" aria-hidden="true">print</span></button>
         </div>
       </div>
     </header>
 
     <!-- MAIN SHELL -->
     <div class="shell">
-      
-      <!-- LEFT RAIL: MODES & STATS -->
-      <aside class="rail">
-        <div class="rail-sec-title">Study Modes</div>
-        <div class="mode-list">
-          <button class="mode-item active" data-mode="practice">
-            <span style="font-size:16px;">💡</span>
+
+      <!-- LEFT SIDEBAR: MODES & STATS -->
+      <aside id="appRail" class="rail" aria-label="Study modes and session status">
+        <div class="rail-head">
+          <div class="rail-sec-title">Study Modes</div>
+          <button id="navClose" class="rail-close" type="button" aria-label="Close navigation"><span class="ms-icon" aria-hidden="true">close</span></button>
+        </div>
+        <nav class="mode-list" aria-label="Study modes">
+          <button class="mode-item active" data-mode="library" aria-current="page">
+            <span class="mode-icon ms-icon" aria-hidden="true">library_books</span>
             <div>
-              <b>Practice</b>
-              <small>Instant feedback & citation</small>
+              <b>Library</b>
+              <small>PDFs &amp; saved sets</small>
             </div>
           </button>
-          <button class="mode-item" data-mode="test">
-            <span style="font-size:16px;">⏱️</span>
+          <button class="mode-item" data-mode="practice">
+            <span class="mode-icon ms-icon" aria-hidden="true">lightbulb</span>
             <div>
-              <b>Exam Test</b>
-              <small>Timed evaluation</small>
+              <b>Practice</b>
+              <small>Instant feedback &amp; citation</small>
             </div>
           </button>
           <button class="mode-item" data-mode="revision">
-            <span style="font-size:16px;">📇</span>
+            <span class="mode-icon ms-icon" aria-hidden="true">style</span>
             <div>
               <b>Revision</b>
               <small>Active recall flashcards</small>
             </div>
           </button>
+          <button class="mode-item" data-mode="test">
+            <span class="mode-icon ms-icon" aria-hidden="true">timer</span>
+            <div>
+              <b>Exam Test</b>
+              <small>Timed evaluation</small>
+            </div>
+          </button>
           <button class="mode-item" data-mode="generator">
-            <span style="font-size:16px;">⚡</span>
+            <span class="mode-icon ms-icon" aria-hidden="true">bolt</span>
             <div>
               <b>Generator</b>
               <small>Extract from notes / PDF</small>
             </div>
           </button>
-          <button class="mode-item" data-mode="library">
-            <span style="font-size:16px;">📚</span>
-            <div>
-              <b>Library</b>
-              <small>Saved offline tests</small>
-            </div>
-          </button>
-        </div>
+        </nav>
 
         <!-- Inline Confidence Meter -->
         <div class="conf-meter">
-          <div style="display:flex; justify-content:space-between; align-items:baseline;">
-            <span style="font-size:10px; font-weight:800; text-transform:uppercase; color:var(--muted);">Session Score</span>
-            <span id="railAcc" class="cm-pct" style="color:var(--good);">0%</span>
+          <div class="cm-head">
+            <span class="cm-label">Session Score</span>
+            <span id="railAcc" class="cm-pct">0%</span>
           </div>
-          <div class="cm-bar"><i id="railBar" style="width:0%;"></i></div>
+          <div class="cm-bar" aria-hidden="true"><i id="railBar" style="width:0%;"></i></div>
           <span id="railSub" class="cm-sub">0 answered of 10</span>
         </div>
 
         <div class="rail-foot">
-          <div>Status: <strong style="color:var(--good);">100% Offline</strong></div>
-          <div style="margin-top:4px; font-size:10.5px; color:var(--muted);">Zero-LLM • Deterministic</div>
+          <div class="status-row">
+            <span id="netDot" class="status-dot" aria-hidden="true"></span>
+            <span id="netStatus">Offline · 100% local</span>
+          </div>
+          <div class="rail-meta">Zero-LLM · Deterministic</div>
+          <div id="cacheStatus" class="rail-meta">Preparing offline cache…</div>
+          <div class="credit" aria-label="With love, usm007">With <span class="credit-heart ms-icon" aria-hidden="true">favorite</span>, usm007</div>
         </div>
       </aside>
+
+      <div id="navBackdrop" class="nav-backdrop" hidden></div>
 
       <!-- CENTER WORKSPACE -->
       <main class="workspace">
@@ -119,92 +136,122 @@
           <div id="qwork">
 
             <!-- QUIZ VIEW -->
-            <div id="quizView" style="display:flex; flex-direction:column; flex:1; min-height:0;">
-              
+            <div id="quizView" class="view quiz-view">
+
               <div class="sheet-head">
                 <div id="sheetNum" class="sheet-num">Q 01</div>
                 <div class="sheet-id">
                   <span id="sheetModeLabel" class="sheet-mode">Practice Mode</span>
                   <span id="sheetContext" class="sheet-ctx">Indian Polity • Supreme Court</span>
                 </div>
-                <button id="markBtn" class="btn" style="min-height:30px; padding:3px 10px; font-size:11.5px;">☆ Bookmark</button>
+                <button id="markBtn" class="btn bookmark-btn" type="button" aria-pressed="false"><span class="ms-icon bookmark-icon" aria-hidden="true">star</span><span class="bookmark-text">Bookmark</span></button>
               </div>
 
               <!-- Exam Mode Strip -->
               <div class="exam-strip">
-                <div>Exam Timer: <span id="examTimer" class="t">00:00</span></div>
-                <div style="margin-left:auto; font-size:11px; color:#cbd5e1;">Marking: +2.00 / -0.66</div>
+                <div class="exam-clock" aria-label="Exam timer"><span class="ms-icon" aria-hidden="true">timer</span><span id="examTimer" class="t">00:00</span></div>
+                <div id="examAnswered" class="exam-answered">0/10 answered</div>
+                <div class="exam-marking">+2.00 / −0.66</div>
+                <button id="examSubmitBtn" class="exam-submit" type="button">Submit Test</button>
               </div>
 
               <div class="sheet-body">
-                <div id="questionContainer">
+                <div id="questionContainer" class="question-content" aria-live="polite">
                   <!-- Dynamic Question Content -->
+                </div>
+                <div id="answerPanel" class="answer-panel" hidden>
+                  <!-- Answer and explanation -->
                 </div>
               </div>
 
               <div class="actions">
-                <button id="prevBtn" class="btn">← Previous</button>
+                <button id="prevBtn" class="btn action-prev" type="button"><span class="ms-icon" aria-hidden="true">arrow_back</span><span>Previous</span></button>
                 <div class="spacer"></div>
-                <button id="nextBtn" class="btn btn-primary">Next Question →</button>
-                <button id="submitBtn" class="btn btn-primary" style="background:var(--good); border-color:var(--good); display:none;">Submit Test ✓</button>
+                <button id="nextBtn" class="btn btn-primary action-next" type="button"><span class="action-next-label">Next</span><span class="ms-icon" aria-hidden="true">arrow_forward</span></button>
+                <button id="submitBtn" class="btn btn-success action-submit" type="button"><span class="ms-icon" aria-hidden="true">check</span><span>Submit Test</span></button>
               </div>
 
             </div>
 
             <!-- GENERATOR VIEW -->
-            <div id="generatorView" style="display:none; padding:24px; overflow-y:auto; flex:1;">
-              <h2 style="font-size:20px; font-weight:800; margin-bottom:6px;">Deterministic Question Generator</h2>
-              <p style="color:var(--muted); font-size:13px; margin-bottom:20px;">
-                Extracts knowledge units and synthesizes competitive MCQs directly on your device in &lt;200ms.
-              </p>
-
-              <div id="dropZone" style="border:2px dashed var(--line-strong); background:var(--surface-2); border-radius:14px; padding:32px 20px; text-align:center; cursor:pointer;">
-                <div style="font-size:36px; margin-bottom:10px;">📄</div>
-                <h3 style="font-size:16px; font-weight:700;">Drop Study Document, Selectable PDF, or Note Photo</h3>
-                <p style="color:var(--muted); font-size:12.5px; margin-top:4px;">Supports .pdf, .txt, .md, and camera photos (.jpg, .png)</p>
-                <input type="file" id="fileInput" accept=".pdf,.txt,.md,.json,.jpg,.jpeg,.png,.webp" style="display:none;">
-              </div>
-
-              <div style="margin-top:16px;">
-                <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Module Title:</label>
-                <input type="text" id="docTitle" placeholder="e.g. SPM IAS Academy — 19 Oct 2026" style="width:100%; padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); font:inherit; margin-top:6px;">
-              </div>
-
-              <div style="margin-top:14px;">
-                <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Or Paste Extracted Notes / Text:</label>
-                <textarea id="docText" rows="6" placeholder="Paste news analysis, syllabus topics, lecture notes or legal articles here..." style="width:100%; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); font:inherit; margin-top:6px; resize:vertical;"></textarea>
-              </div>
-
-              <div style="margin-top:16px;">
-                <span style="font-size:12px; color:var(--muted);">Quick 1-Click Samples:</span>
-                <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-                  <button id="chipDemoSpm" class="btn btn-sm" type="button">🗞️ SPM IAS Newspaper (19 Oct 2026)</button>
-                  <button id="chipDemoScience" class="btn btn-sm" type="button">🚀 Chandrayaan-3 Mission Notes</button>
+            <div id="generatorView" class="view generator-view" style="display:none;">
+              <div class="view-inner">
+                <div class="view-heading">
+                  <div>
+                    <h2>Deterministic Question Generator</h2>
+                    <p>Extracts knowledge units and synthesizes competitive MCQs directly on your device in under 200 ms.</p>
+                  </div>
+                  <span class="offline-pill">100% on-device</span>
                 </div>
-              </div>
 
-              <button id="generateBtn" class="btn btn-primary" type="button" style="width:100%; margin-top:20px; padding:13px; font-size:15px;">
-                ⚡ Generate Offline Quiz & Study Package
-              </button>
+                <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Choose a study document or note photo">
+                  <div class="drop-icon"><span class="ms-icon" aria-hidden="true">upload_file</span></div>
+                  <h3>Drop a study document, selectable PDF, or note photo</h3>
+                  <p>Supports .pdf, .txt, .md, and camera photos (.jpg, .png, .webp)</p>
+                  <span class="drop-cta">Choose a file</span>
+                  <input type="file" id="fileInput" accept=".pdf,.txt,.md,.json,.jpg,.jpeg,.png,.webp" hidden>
+                </div>
+                <div id="fileStatus" class="file-status" role="status" aria-live="polite"></div>
+
+                <div class="field-group">
+                  <label for="docTitle">Module title</label>
+                  <input type="text" id="docTitle" placeholder="e.g. SPM IAS Academy — 19 Oct 2026" autocomplete="off">
+                </div>
+
+                <div class="field-group">
+                  <label for="docText">Or paste extracted notes / text</label>
+                  <textarea id="docText" rows="6" placeholder="Paste news analysis, syllabus topics, lecture notes, or legal articles here…"></textarea>
+                </div>
+
+                <div class="samples">
+                  <span class="samples-label">Quick 1-click samples:</span>
+                  <div class="sample-buttons">
+                    <button id="chipDemoSpm" class="btn btn-sm" type="button"><span class="ms-icon" aria-hidden="true">newspaper</span><span>SPM IAS Newspaper (19 Oct 2026)</span></button>
+                    <button id="chipDemoScience" class="btn btn-sm" type="button"><span class="ms-icon" aria-hidden="true">rocket_launch</span><span>Chandrayaan-3 Mission Notes</span></button>
+                  </div>
+                </div>
+
+                <button id="generateBtn" class="btn btn-primary generate-btn" type="button">
+                  <span class="ms-icon" aria-hidden="true">bolt</span>
+                  <span class="generate-label">Generate Offline Quiz &amp; Study Package</span>
+                </button>
+                <p class="generator-note">Nothing leaves this device. Generation is deterministic, so the same notes always produce the same quiz.</p>
+                <div class="credit subtle-credit" aria-label="With love, usm007">With <span class="credit-heart ms-icon" aria-hidden="true">favorite</span>, usm007</div>
+              </div>
             </div>
 
             <!-- REVISION / FLASHCARD VIEW -->
-            <div id="revisionView" style="display:none; padding:24px; text-align:center; flex:1; flex-direction:column; justify-content:center;">
-              <span id="flashcardCount" style="font-size:12px; color:var(--muted); font-weight:700; text-transform:uppercase;">Card 1 of 10</span>
-              <div id="flashcardBox" style="margin:24px auto; max-width:600px; width:100%; min-height:220px; background:var(--surface-2); border:1px solid var(--line); border-radius:16px; padding:30px; display:flex; flex-direction:column; justify-content:center; align-items:center; cursor:pointer; box-shadow:var(--shadow-sm);">
-                <!-- Dynamic Flashcard Content -->
-              </div>
-              <div style="display:flex; justify-content:center; gap:12px;">
-                <button id="prevCardBtn" class="btn">← Previous Card</button>
-                <button id="nextCardBtn" class="btn btn-primary">Next Card →</button>
+            <div id="revisionView" class="view revision-view" style="display:none;">
+              <div class="view-inner revision-inner">
+                <span id="flashcardCount" class="flashcard-count">Card 1 of 10</span>
+                <div id="flashcardBox" class="flashcard" role="button" tabindex="0" aria-label="Flashcard. Activate to reveal the answer.">
+                  <!-- Dynamic Flashcard Content -->
+                </div>
+                <div class="flashcard-hint">Tap the card to flip · use the buttons to move</div>
+                <div class="flashcard-actions">
+                  <button id="prevCardBtn" class="btn" type="button"><span class="ms-icon" aria-hidden="true">arrow_back</span><span>Previous Card</span></button>
+                  <button id="nextCardBtn" class="btn btn-primary" type="button"><span>Next Card</span><span class="ms-icon" aria-hidden="true">arrow_forward</span></button>
+                </div>
               </div>
             </div>
 
             <!-- LIBRARY VIEW -->
-            <div id="libraryView" style="display:none; padding:24px; overflow-y:auto; flex:1;">
-              <h2 style="font-size:20px; font-weight:800; margin-bottom:6px;">Offline Library</h2>
-              <p style="color:var(--muted); font-size:13px; margin-bottom:16px;">Persisted indefinitely in your device's IndexedDB.</p>
-              <div id="libraryContainer"></div>
+            <div id="libraryView" class="view library-view" style="display:none;">
+              <div class="view-inner">
+                <div class="view-heading">
+                  <div>
+                    <h2>Offline Library</h2>
+                    <p>Every PDF and saved set stays on this device. Choose Practice, Revision, or Exam Test for the set you want to study.</p>
+                  </div>
+                  <span class="offline-pill">On this device</span>
+                </div>
+                <div class="library-toolbar">
+                  <span class="library-toolbar-label">Saved on this device</span>
+                  <button id="libraryGenerateBtn" class="btn btn-sm" type="button"><span class="ms-icon" aria-hidden="true">add</span><span>Add PDF or notes</span></button>
+                </div>
+                <div id="libraryContainer"></div>
+                <div class="credit subtle-credit" aria-label="With love, usm007">With <span class="credit-heart ms-icon" aria-hidden="true">favorite</span>, usm007</div>
+              </div>
             </div>
 
           </div>
@@ -212,9 +259,9 @@
       </main>
 
       <!-- RIGHT LIVEBAR: ANALYTICS (Desktop) -->
-      <aside class="livebar">
+      <aside class="livebar" aria-label="Live analytics">
         <div class="live-acc">
-          <div id="liveAccNum" class="live-acc-v" style="color:var(--accent);">0%</div>
+          <div id="liveAccNum" class="live-acc-v">0%</div>
           <div class="live-acc-s">Live Accuracy</div>
         </div>
 
@@ -229,8 +276,8 @@
           </div>
         </div>
 
-        <div style="margin-top:10px;">
-          <span style="font-size:10px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted);">Question Palette</span>
+        <div class="palette-wrap">
+          <span class="palette-label">Question Palette</span>
           <div id="livePalette" class="palette-grid"></div>
         </div>
       </aside>
@@ -238,8 +285,36 @@
     </div>
   </div>
 
+  <!-- Scorecard -->
+  <div id="scoreModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="scoreTitle">
+    <div class="modal-card">
+      <div class="score-hero">
+        <span class="score-kicker">Exam complete</span>
+        <strong id="scoreTitle" class="score-value">0.00</strong>
+        <span id="scoreMax" class="score-max">out of 20.00</span>
+        <span id="scoreBand" class="score-band">Keep practising</span>
+      </div>
+      <div class="score-grid">
+        <div><b id="scoreCorrect">0</b><span>Correct</span></div>
+        <div><b id="scoreWrong">0</b><span>Wrong</span></div>
+        <div><b id="scoreSkipped">0</b><span>Skipped</span></div>
+        <div><b id="scoreTime">00:00</b><span>Time</span></div>
+      </div>
+      <p id="scoreNote" class="score-note">Marking: +2.00 for a correct answer, −0.66 for a wrong answer.</p>
+      <div class="modal-actions">
+        <button id="scoreReviewBtn" class="btn" type="button">Review answers</button>
+        <button id="scoreRetakeBtn" class="btn btn-primary" type="button">Retake test</button>
+      </div>
+      <button id="scoreCloseBtn" class="modal-close" type="button" aria-label="Close scorecard"><span class="ms-icon" aria-hidden="true">close</span></button>
+    </div>
+  </div>
+
   <!-- Notification Toast -->
-  <div id="toast" class="toast">Action completed</div>
+  <div id="toast" class="toast" role="status" aria-live="polite">Action completed</div>
+
+  <noscript>
+    <div class="noscript">StudySynth needs JavaScript enabled to generate and study quizzes offline.</div>
+  </noscript>
 
   <!-- Offline Scripts -->
   <script src="./sample_data.js"></script>
@@ -247,6 +322,7 @@
   <script src="./engine/pdfParser.js"></script>
   <script src="./engine/ocr.js"></script>
   <script src="./engine/storage.js"></script>
+  <script src="./vendor/tesseract/tesseract.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

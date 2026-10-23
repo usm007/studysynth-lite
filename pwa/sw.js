@@ -1,96 +1,97 @@
 /**
- * StudySynth — Offline Service Worker (v2)
- * Bulletproof offline caching for Android PWA and standalone web apps.
+ * StudySynth - Offline Service Worker (v14)
+ * Caches the complete local workspace so the installed app opens and works
+ * without a network. All paths are scope-relative for sub-path hosting.
  */
 
-const CACHE_NAME = 'studysynth-v2';
+const CACHE_NAME = 'studysynth-v14';
 const CORE_ASSETS = [
-  '/',
-  '/?mode=standalone',
-  '/index.html',
-  '/styles.css',
-  '/app.js',
-  '/sample_data.js',
-  '/engine/generator.js',
-  '/engine/pdfParser.js',
-  '/engine/ocr.js',
-  '/engine/storage.js',
-  '/manifest.webmanifest',
-  '/assets/logo.png',
-  '/assets/icon-192.png',
-  '/assets/icon-512.png',
-  '/assets/favicon.png',
-  '/assets/apple-touch-icon.png'
+  './',
+  './?mode=standalone',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './sample_data.js',
+  './engine/generator.js',
+  './engine/pdfParser.js',
+  './engine/ocr.js',
+  './engine/storage.js',
+  './manifest.webmanifest',
+  './assets/logo.png',
+  './assets/icon-192.png',
+  './assets/icon-512.png',
+  './assets/favicon.png',
+  './assets/apple-touch-icon.png',
+  './assets/material/material-symbols-rounded-subset.woff2',
+  './vendor/tesseract/tesseract.min.js',
+  './vendor/tesseract/worker.min.js',
+  './vendor/tesseract/tesseract-core-simd-lstm.wasm.js',
+  './vendor/tesseract/tesseract-core-simd-lstm.wasm',
+  './vendor/tesseract/eng.traineddata',
+  './vendor/pdfjs/pdf.mjs',
+  './vendor/pdfjs/pdf.worker.mjs'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
-      // Resilient caching: cache each asset individually so one redirect/failure does not abort SW
-      for (const asset of CORE_ASSETS) {
-        try {
-          await cache.add(asset);
-        } catch (err) {
-          console.warn('SW pre-cache item warning:', asset, err);
-        }
-      }
+      // Cache independently so one optional asset cannot abort installation.
+      await Promise.allSettled(
+        CORE_ASSETS.map((asset) => cache.add(new Request(asset, { cache: 'reload' })))
+      );
     }).then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((key) => key !== CACHE_NAME ? caches.delete(key) : null)))
+      .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
+});
 
-  // 1. Navigation Requests (Opening app from Android home screen or clicking links)
-  if (event.request.mode === 'navigate') {
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Navigation: always serve the app shell. The app is a single page and
+  // must open instantly even when the device is in airplane mode.
+  if (request.mode === 'navigate') {
     event.respondWith(
-      caches.match(event.request, { ignoreSearch: true })
-        .then((cached) => {
-          if (cached) return cached;
-          return caches.match('/index.html') || caches.match('/') || caches.match('/?mode=standalone');
-        })
-        .then((response) => {
-          if (response) return response;
-          return fetch(event.request).catch(() => {
-            return caches.match('/index.html') || caches.match('/');
-          });
-        })
+      caches.match(request, { ignoreSearch: true })
+        .then((cached) => cached || caches.match('./index.html') || caches.match('./'))
+        .then((response) => response || fetch(request).catch(() => caches.match('./index.html')))
     );
     return;
   }
 
-  // 2. Static Assets (Cache-First strategy)
+  // Static assets: cache-first for instant, zero-network startup.
   event.respondWith(
-    caches.match(event.request, { ignoreSearch: true }).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
+    caches.match(request, { ignoreSearch: true }).then((cached) => {
+      if (cached) return cached;
+
+      return fetch(request).then((networkResponse) => {
+        if (networkResponse && (networkResponse.status === 200 || networkResponse.type === 'opaque')) {
           const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          caches.open(CACHE_NAME)
+            .then((cache) => cache.put(request, clone))
+            .catch(() => { /* quota or private mode */ });
         }
         return networkResponse;
       }).catch(() => {
-        // Fallback for image requests
-        if (event.request.destination === 'image') {
-          return caches.match('/assets/logo.png');
+        if (request.destination === 'image') return caches.match('./assets/logo.png');
+        if (request.destination === 'script' || request.destination === 'style') {
+          return caches.match(request, { ignoreSearch: true }).then((hit) => hit || Response.error());
         }
-        return caches.match('/index.html');
+        return caches.match('./index.html').then((hit) => hit || Response.error());
       });
     })
   );

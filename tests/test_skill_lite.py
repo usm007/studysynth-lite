@@ -40,22 +40,136 @@ def run_full(*args, **kwargs):
     return subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT), timeout=300, **kwargs)
 
 
+class TestAgentDrivenGenerationHandoff(unittest.TestCase):
+    def test_source_only_stops_with_agent_handoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp, "handoff_source.md")
+            src.write_text(
+                "# Constitutional Framework\n\nThe Constitution of India was adopted on 26 November 1949 "
+                "and became effective on 26 January 1950. Dr. B.R. Ambedkar chaired the Drafting Committee.",
+                encoding="utf-8",
+            )
+            res = run_lite(
+                "--source", str(src),
+                "--run-id", "handoff_test",
+                "--build-dir", tmp,
+                "--package", "--web",
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            run_dir = Path(tmp, "handoff_test")
+
+            handoff_path = run_dir / "lite_handoff.json"
+            self.assertTrue(handoff_path.is_file())
+            handoff = load_json(handoff_path)
+            self.assertEqual(handoff.get("status"), "pending_agent_generation")
+            self.assertTrue(str(handoff.get("prompt", "")).endswith("lite-generate.md"))
+            self.assertTrue(Path(handoff["expected_outputs"]["inventory"]).name == "knowledge_inventory.json")
+            self.assertTrue(Path(handoff["expected_outputs"]["bank"]).name == "question_bank.json")
+            self.assertIn("--inventory", handoff.get("next_command", ""))
+            self.assertIn("--bank", handoff.get("next_command", ""))
+            self.assertEqual(handoff.get("budget", {}).get("generation_passes"), 1)
+            self.assertEqual(handoff.get("budget", {}).get("repair_passes"), 1)
+
+            # The deterministic engine must not run implicitly.
+            self.assertFalse((run_dir / "quiz_package.json").is_file())
+            self.assertFalse((run_dir / "question_bank.json").is_file())
+
+            state = load_json(run_dir / "pipeline_state_lite.json")
+            self.assertEqual(state["stages"]["generate_lite"]["status"], "pending_agent_generation")
+            metrics = load_json(run_dir / "run_metrics_lite.json")
+            self.assertIn("pending", str(metrics.get("model_calls")).lower())
+
+    def test_partial_inventory_or_bank_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = ROOT / "examples" / "sample_source.md"
+            inv = ROOT / "examples" / "sample_inventory.json"
+            res = run_lite(
+                "--source", str(src),
+                "--inventory", str(inv),
+                "--run-id", "partial_test",
+                "--build-dir", tmp,
+            )
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("must be provided together", res.stderr + res.stdout)
+
+
+class TestTraceMetrics(unittest.TestCase):
+    def test_supplied_bank_with_trace_reports_one_model_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = ROOT / "examples" / "sample_source.md"
+            inv = ROOT / "examples" / "sample_inventory.json"
+            bank = ROOT / "examples" / "question_bank_apsc.json"
+            run_dir = Path(tmp, "trace_test")
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "llm_trace.jsonl").write_text(
+                json.dumps({"stage": "lite_generate", "success": True}) + "\n",
+                encoding="utf-8",
+            )
+
+            res = run_lite(
+                "--source", str(src),
+                "--inventory", str(inv),
+                "--bank", str(bank),
+                "--run-id", "trace_test",
+                "--build-dir", tmp,
+                "--package",
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            metrics = load_json(run_dir / "run_metrics_lite.json")
+            self.assertEqual(metrics.get("model_calls"), 1)
+            self.assertEqual(metrics.get("llm_telemetry", {}).get("total_calls"), 1)
+
+    def test_handoff_without_trace_reports_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = ROOT / "examples" / "sample_source.md"
+            inv = ROOT / "examples" / "sample_inventory.json"
+            bank = ROOT / "examples" / "question_bank_apsc.json"
+            run_dir = Path(tmp, "missing_trace")
+
+            res = run_lite(
+                "--source", str(src),
+                "--run-id", "missing_trace",
+                "--build-dir", tmp,
+                "--package",
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            (run_dir / "knowledge_inventory.json").write_bytes(inv.read_bytes())
+            (run_dir / "question_bank.json").write_bytes(bank.read_bytes())
+
+            res = run_lite(
+                "--source", str(src),
+                "--inventory", str(run_dir / "knowledge_inventory.json"),
+                "--bank", str(run_dir / "question_bank.json"),
+                "--run-id", "missing_trace",
+                "--build-dir", tmp,
+                "--package",
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            metrics = load_json(run_dir / "run_metrics_lite.json")
+            self.assertIn("unavailable", str(metrics.get("model_calls")).lower())
+            self.assertEqual(metrics.get("llm_telemetry", {}).get("status"), "missing_trace")
+
+
 class TestInputCategoryCompatibility(unittest.TestCase):
     def test_markdown_source_processing(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp, "test_input.md")
             src.write_text("# Chapter 1: Constitutional Framework\n\nThe Constitution of India was adopted on 26 November 1949 and became effective on 26 January 1950. Dr. B.R. Ambedkar served as the Chairman of the Drafting Committee.", encoding="utf-8")
-            res = run_lite("--source", str(src), "--run-id", "md_test", "--build-dir", tmp, "--package", "--web")
+            res = run_lite("--source", str(src), "--run-id", "md_test", "--build-dir", tmp, "--package", "--web", "--offline-engine")
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             self.assertTrue(Path(tmp, "md_test", "document_structure.json").is_file())
             self.assertTrue(Path(tmp, "md_test", "quiz_package.json").is_file())
             self.assertTrue(Path(tmp, "md_test", "quiz.html").is_file())
+            state = load_json(Path(tmp, "md_test", "pipeline_state_lite.json"))
+            self.assertEqual(state["stages"]["generate_lite"]["status"], "offline_engine")
+            metrics = load_json(Path(tmp, "md_test", "run_metrics_lite.json"))
+            self.assertEqual(metrics.get("model_calls"), 0)
 
     def test_plain_text_source_processing(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp, "test_input.txt")
             src.write_text("The Reserve Bank of India was established on April 1, 1935 under the Reserve Bank of India Act. The central office was initially in Kolkata and moved to Mumbai in 1937.", encoding="utf-8")
-            res = run_lite("--source", str(src), "--run-id", "txt_test", "--build-dir", tmp, "--package", "--web")
+            res = run_lite("--source", str(src), "--run-id", "txt_test", "--build-dir", tmp, "--package", "--web", "--offline-engine")
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             self.assertTrue(Path(tmp, "txt_test", "document_structure.json").is_file())
             self.assertTrue(Path(tmp, "txt_test", "quiz_package.json").is_file())
@@ -64,7 +178,7 @@ class TestInputCategoryCompatibility(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp, "test_input.html")
             src.write_text("<html><body><h1>Indian Space Programme</h1><p>ISRO was founded in 1969. The Chandrayaan-3 mission successfully landed near the lunar south pole in August 2023.</p></body></html>", encoding="utf-8")
-            res = run_lite("--source", str(src), "--run-id", "html_test", "--build-dir", tmp, "--package")
+            res = run_lite("--source", str(src), "--run-id", "html_test", "--build-dir", tmp, "--package", "--offline-engine")
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             self.assertTrue(Path(tmp, "html_test", "document_structure.json").is_file())
             self.assertTrue(Path(tmp, "html_test", "quiz_package.json").is_file())
@@ -163,7 +277,7 @@ class TestGeneralizationAndSensibleDefaults(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp, "science_source.md")
             src.write_text("# Photosynthesis and Cellular Respiration\n\nPhotosynthesis converts light energy into chemical energy stored in glucose. Light-dependent reactions occur in the thylakoid membranes, while the Calvin cycle occurs in the stroma. Cellular respiration oxidizes glucose into carbon dioxide and water, yielding ATP.", encoding="utf-8")
-            res = run_lite("--source", str(src), "--run-id", "sci_test", "--build-dir", tmp, "--package")
+            res = run_lite("--source", str(src), "--run-id", "sci_test", "--build-dir", tmp, "--package", "--offline-engine")
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             pkg = load_json(Path(tmp, "sci_test", "quiz_package.json"))
             self.assertTrue(len(pkg["questions"]) > 0)
@@ -173,7 +287,7 @@ class TestGeneralizationAndSensibleDefaults(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp, "geo_source.md")
             src.write_text("# Major River Systems of South Asia\n\nThe Indus River originates near Lake Mansarovar in the Tibetan Plateau. It flows across Jammu and Kashmir before traversing Pakistan to enter the Arabian Sea. The major tributaries include the Jhelum, Chenab, Ravi, Beas, and Sutlej.", encoding="utf-8")
-            res = run_lite("--source", str(src), "--run-id", "geo_test", "--build-dir", tmp, "--package")
+            res = run_lite("--source", str(src), "--run-id", "geo_test", "--build-dir", tmp, "--package", "--offline-engine")
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             pkg = load_json(Path(tmp, "geo_test", "quiz_package.json"))
             self.assertTrue(len(pkg["questions"]) > 0)
@@ -271,7 +385,8 @@ class TestPerformanceBenchmarks(unittest.TestCase):
             self.assertEqual(m.get("edition"), "Lite")
             self.assertIn("stages", m)
             self.assertIn("total_s", m)
-            self.assertLess(t_lite, 15.0, "Lite pipeline execution took too long")
+            self.assertEqual(m.get("model_calls"), 0, "Supplied-bank run should report zero agent passes")
+            self.assertLess(t_lite, 60.0, "Lite pipeline execution took too long")
 
 
 if __name__ == "__main__":

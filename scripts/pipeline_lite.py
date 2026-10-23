@@ -1,12 +1,14 @@
-"""StudySynth Lite — Lightweight, Drop-in Pipeline Coordinator (scripts/pipeline_lite.py).
+"""StudySynth Lite — Agent-Driven, Drop-in Pipeline Coordinator (scripts/pipeline_lite.py).
 
-Implements the lean 6-step execution model:
-1. Receive: Accept identical input types and options as pipeline.py
-2. Prepare: Deterministic ingest and anchor extraction (no persona/profile prompt selection)
-3. Generate: Direct, single-pass generation (prompts/lite-generate.md / generate_lite.py)
-4. Validate: Inexpensive deterministic checks (validate_questions, quality, dedupe, coverage, audit, gate)
-5. Repair: Localized repair queue on validation failures; no speculative multi-round loops
-6. Return: Complete package delivery (quiz_package.json, quiz.html, print-ready PDFs, dashboard)
+Implements the lean Lite execution model:
+1. Receive: Accept the same inputs and options as the full pipeline.
+2. Prepare: Deterministic ingest and anchor extraction (no persona/profile routing).
+3. Generate: Hand off to one combined agent pass that writes the knowledge inventory and
+   question bank from prompts/lite-generate.md. The deterministic generator is only used
+   when the explicit --offline-engine demo/test flag is set.
+4. Validate: Inexpensive deterministic checks (validate_questions, quality, dedupe, coverage, audit, gate).
+5. Repair: Write a localized repair queue; at most one targeted agent repair pass.
+6. Return: Complete package delivery (quiz_package.json, quiz.html, print-ready PDFs, dashboard).
 """
 import argparse
 import concurrent.futures
@@ -18,9 +20,18 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_common import load_json, save_json, ensure_dir, run_main
 from cache import sha_file, sha_obj, load_manifest, save_manifest
+from llm_trace import summarize_llm_trace, load_llm_trace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+LITE_PROMPT = os.path.join(ROOT, "prompts", "lite-generate.md")
+
+
+def _quote_cmd_arg(value):
+    value = str(value)
+    if not value or any(ch.isspace() for ch in value) or '"' in value:
+        return '"%s"' % value.replace('"', '\\"')
+    return value
 
 
 def mod(name):
@@ -74,6 +85,11 @@ def main(argv):
     ap.add_argument("--mode", default=None, help="Fidelity mode (SOURCE_BOUND or ENHANCED)")
     ap.add_argument("--inventory", default=None, help="Path to knowledge_inventory.json")
     ap.add_argument("--bank", default=None, help="Path to question_bank.json")
+    ap.add_argument(
+        "--offline-engine",
+        action="store_true",
+        help="Use the deterministic offline/PWA fixture generator instead of the agent generation pass (demo/test only)",
+    )
     ap.add_argument("--ignored", default=None, help="Path to ignored_anchors.json")
     ap.add_argument("--diff", default=None, help="Path to inventory_diff.json")
     ap.add_argument("--package", action="store_true", help="Assemble quiz_package.json")
@@ -92,13 +108,28 @@ def main(argv):
         "run_id": a.run_id,
         "edition": "Lite",
         "stages": {},
-        "model_calls": 0,
+        "model_calls": None,
+        "llm_budget": {"generation_passes": 1, "repair_passes": 1},
+        "generation_mode": "pre_generation",
         "cache": {"hits": 0, "misses": 0}
     }
 
     if not os.path.isfile(a.source):
         print("error: source not found: %s" % a.source, file=sys.stderr)
         return 1
+
+    has_inventory = bool(a.inventory)
+    has_bank = bool(a.bank)
+    if has_inventory != has_bank:
+        print("error: --inventory and --bank must be provided together", file=sys.stderr)
+        return 1
+    if has_inventory:
+        if not os.path.isfile(a.inventory):
+            print("error: inventory not found: %s" % a.inventory, file=sys.stderr)
+            return 1
+        if not os.path.isfile(a.bank):
+            print("error: bank not found: %s" % a.bank, file=sys.stderr)
+            return 1
 
     # Resolve paths
     R = a.run_id if os.path.basename(os.path.normpath(a.build_dir)) == a.run_id else os.path.join(a.build_dir, a.run_id)
@@ -114,6 +145,8 @@ def main(argv):
         "anchors": os.path.join(R, "anchors.json"),
         "inventory": a.inventory or os.path.join(R, "knowledge_inventory.json"),
         "bank": a.bank or os.path.join(R, "question_bank.json"),
+        "trace": os.path.join(R, "llm_trace.jsonl"),
+        "handoff": os.path.join(R, "lite_handoff.json"),
         "check": os.path.join(R, "inventory_check.json"),
         "validation": os.path.join(R, "validation_results.json"),
         "quality": os.path.join(R, "quality_report.json"),
@@ -140,43 +173,162 @@ def main(argv):
         metrics["stages"][stage] = {"duration_s": round(dt, 3), "rc": rc}
         return rc
 
+    def save_metrics():
+        mode_now = metrics.get("generation_mode")
+        if mode_now == "offline_engine":
+            metrics["model_calls"] = 0
+            metrics["llm_telemetry"] = {"status": "offline_engine"}
+        elif mode_now == "provided":
+            summary = summarize_llm_trace(F["trace"])
+            if summary is not None:
+                metrics["model_calls"] = summary["total_calls"]
+                metrics["llm_telemetry"] = summary
+            elif os.path.isfile(F["handoff"]):
+                # This bank came through the Lite handoff, but the agent did not
+                # record its pass. Do not silently claim zero model calls.
+                metrics["model_calls"] = "unavailable (agent-driven; no llm_trace.jsonl)"
+                metrics["llm_telemetry"] = {"status": "missing_trace"}
+            else:
+                metrics["model_calls"] = 0
+                metrics["llm_telemetry"] = {"status": "no_trace"}
+        # pending_agent_generation and pre_generation keep their explicit state.
+        metrics["total_s"] = round(time.time() - t0, 3)
+        save_json(F["metrics"], metrics)
+
     # 1. Ingest
     rc = timed("ingest", lambda: run_stage(mod("ingest").main, [a.source, "--out", R, "--run-id", a.run_id]))
     mark("ingest", "ok" if rc == 0 else "failed")
     if rc:
-        save_json(F["metrics"], metrics)
+        save_metrics()
         return rc
 
     # 2. Anchors
     rc = timed("anchors", lambda: run_stage(mod("anchors").main, [F["struct"], "--out", F["anchors"]]))
     mark("anchors", "ok" if rc == 0 else "failed")
     if rc:
-        save_json(F["metrics"], metrics)
+        save_metrics()
         return rc
 
-    # 3. Direct Generation (if inventory or bank not provided)
-    need_gen = not (a.inventory and os.path.isfile(a.inventory) and a.bank and os.path.isfile(a.bank))
-    if need_gen:
+    # 3. Generation
+    # Default Lite path: one combined agent pass. The pipeline prepares the inputs and
+    # stops with a handoff instead of silently substituting the deterministic engine.
+    if has_inventory:
+        F["inventory"] = a.inventory
+        F["bank"] = a.bank
+        metrics["generation_mode"] = "provided"
+        mark("generate_lite", "skipped", "user provided inventory and bank")
+
+    elif a.offline_engine:
         def do_generate():
+            metrics["generation_mode"] = "offline_engine"
             gen_mod = mod("generate_lite")
             struct = load_json(F["struct"])
             anchors_data = load_json(F["anchors"]) if os.path.isfile(F["anchors"]) else None
             prof_data = load_json(profile_path) if os.path.isfile(profile_path) else None
             gen_mod.generate_lite_artifacts(struct, anchors_data, cfg, prof_data, R)
-            metrics["model_calls"] = 1  # 1 generalized pass replaces 8-15 iterative LLM passes
+            metrics["model_calls"] = 0  # deterministic PWA/fixture engine; no model call
             return 0
 
         rc = timed("generate_lite", do_generate)
-        mark("generate_lite", "ok" if rc == 0 else "failed")
+        mark(
+            "generate_lite",
+            "offline_engine" if rc == 0 else "failed",
+            "explicit --offline-engine demo/test path",
+        )
         F["inventory"] = os.path.join(R, "knowledge_inventory.json")
         F["bank"] = os.path.join(R, "question_bank.json")
         if rc:
-            save_json(F["metrics"], metrics)
+            save_metrics()
             return rc
+
     else:
-        F["inventory"] = a.inventory
-        F["bank"] = a.bank
-        mark("generate_lite", "skipped", "user provided inventory and bank")
+        inv_out = os.path.abspath(os.path.join(R, "knowledge_inventory.json"))
+        bank_out = os.path.abspath(os.path.join(R, "question_bank.json"))
+        next_tokens = [str(x) for x in argv]
+        # Keep the rerun command usable from any working directory.
+        for flag, value in (
+            ("--source", os.path.abspath(a.source)),
+            ("--build-dir", os.path.abspath(a.build_dir)),
+            ("--profile", os.path.abspath(profile_path)),
+            ("--config", os.path.abspath(config_path)),
+        ):
+            for i, token in enumerate(next_tokens[:-1]):
+                if token == flag:
+                    next_tokens[i + 1] = value
+                    break
+        next_argv = [sys.executable, os.path.abspath(__file__)] + next_tokens + [
+            "--inventory", inv_out,
+            "--bank", bank_out,
+        ]
+        next_command = " ".join(_quote_cmd_arg(x) for x in next_argv)
+        record_argv = [
+            sys.executable,
+            os.path.join(HERE, "record_lite_pass.py"),
+            "--run-dir", os.path.abspath(R),
+            "--stage", "lite_generate",
+            "--pass-number", "1",
+        ]
+        handoff = {
+            "status": "pending_agent_generation",
+            "edition": "Lite",
+            "run_id": a.run_id,
+            "source": os.path.abspath(a.source),
+            "run_dir": os.path.abspath(R),
+            "prompt": os.path.abspath(LITE_PROMPT),
+            "inputs": {
+                "document_structure": os.path.abspath(F["struct"]),
+                "anchors": os.path.abspath(F["anchors"]),
+                "profile": os.path.abspath(profile_path),
+                "config": os.path.abspath(config_path),
+            },
+            "expected_outputs": {
+                "inventory": inv_out,
+                "bank": bank_out,
+                "trace": os.path.abspath(F["trace"]),
+                "repair_queue": os.path.abspath(F["repair"]),
+            },
+            "budget": {"generation_passes": 1, "repair_passes": 1},
+            "record_command": " ".join(_quote_cmd_arg(x) for x in record_argv),
+            "repair_record_command": " ".join(
+                _quote_cmd_arg(x) for x in (
+                    record_argv[:-4] + ["--stage", "lite_repair", "--pass-number", "1"]
+                )
+            ),
+            "next_argv": next_argv,
+            "next_command": next_command,
+            "instructions": [
+                "Read the prompt and perform exactly one combined generation pass.",
+                "Write knowledge_inventory.json and question_bank.json as separate files.",
+                "Record the pass with scripts/record_lite_pass.py so model_calls is truthful.",
+                "Rerun the printed command with --inventory and --bank.",
+                "If validation rejects items, repair only those items once, then rerun.",
+            ],
+        }
+        save_json(F["handoff"], handoff)
+        metrics["generation_mode"] = "pending_agent_generation"
+        metrics["model_calls"] = "pending (agent generation)"
+        metrics["llm_telemetry"] = {"status": "pending_agent_generation"}
+        mark(
+            "generate_lite",
+            "pending_agent_generation",
+            "one combined agent pass required; see lite_handoff.json",
+        )
+        save_metrics()
+        print("pipeline_lite %s: source prepared; awaiting one agent generation pass" % a.run_id)
+        print("  prompt: %s" % os.path.abspath(LITE_PROMPT))
+        print("  write:  %s" % inv_out)
+        print("          %s" % bank_out)
+        print(
+            "  record: %s %s --run-dir %s --stage lite_generate --pass-number 1"
+            % (
+                _quote_cmd_arg(sys.executable),
+                _quote_cmd_arg(os.path.join(HERE, "record_lite_pass.py")),
+                _quote_cmd_arg(os.path.abspath(R)),
+            )
+        )
+        print("  rerun:  %s" % next_command)
+        print("  note:   deterministic generation is disabled by default; --offline-engine is for demo/test fixtures only")
+        return 0
 
     # 4. Inventory check (Deterministic Anchor Recall)
     ignored_path = a.ignored
@@ -222,7 +374,7 @@ def main(argv):
     rc = timed("check", lambda: run_stage(mod("inventory_check").main, check_args))
     mark("check", "ok" if rc == 0 else "failed")
     if rc:
-        save_json(F["metrics"], metrics)
+        save_metrics()
         return rc
 
     # 5. Parallel Deterministic Verification: validate_questions, quality, dedupe
@@ -266,8 +418,23 @@ def main(argv):
         vr = load_json(F["validation"])
         rej = [r for r in vr.get("results", []) if r.get("status") == "rejected"]
         if rej:
-            save_json(F["repair"], {"failed": rej, "max_retries": 1})
-            mark("validate", "completed_with_rejections", "%d rejected" % len(rej))
+            repair_history = [
+                r for r in load_llm_trace(F["trace"]) if r.get("stage") == "lite_repair"
+            ]
+            if repair_history:
+                mark("repair", "exhausted", "one repair pass was already recorded")
+                print("notice: one repair pass already recorded; no further repair queue written")
+            else:
+                save_json(F["repair"], {
+                    "failed": rej,
+                    "max_retries": 1,
+                    "instruction": (
+                        "Repair only these failed questions once, keep accepted questions unchanged, "
+                        "record a lite_repair pass, then rerun with the same --inventory and --bank."
+                    ),
+                })
+                mark("validate", "completed_with_rejections", "%d rejected" % len(rej))
+                mark("repair", "pending", "one targeted agent repair pass allowed")
 
     # 6. Coverage, Audit, Gate, Report
     cov_args = [F["bank"], F["inventory"], F["validation"], "--out", F["coverage"], "--config", config_path]
@@ -279,7 +446,7 @@ def main(argv):
     rc = timed("coverage", lambda: run_stage(mod("coverage").main, cov_args))
     mark("coverage", "ok" if rc == 0 else "failed")
     if rc:
-        save_json(F["metrics"], metrics)
+        save_metrics()
         return rc
 
     audit_args = [
@@ -295,7 +462,7 @@ def main(argv):
     rc = timed("audit", lambda: run_stage(mod("audit").main, audit_args))
     mark("audit", "ok" if rc == 0 else "failed")
     if rc:
-        save_json(F["metrics"], metrics)
+        save_metrics()
         return rc
 
     rc = timed("gate", lambda: run_stage(mod("gate").main, [F["audit"], "--config", config_path, "--out", F["gate"]]))
@@ -319,7 +486,7 @@ def main(argv):
         ]))
         mark("package", "ok" if rc == 0 else "failed")
         if rc:
-            save_json(F["metrics"], metrics)
+            save_metrics()
             return rc
 
     def run_web():
@@ -404,8 +571,7 @@ def main(argv):
         ]))
         mark("delivery", "ok" if rc == 0 else "failed")
 
-    metrics["total_s"] = round(time.time() - t0, 3)
-    save_json(F["metrics"], metrics)
+    save_metrics()
     print("pipeline_lite %s: completed in %.2fs -> %s" % (a.run_id, metrics["total_s"], R))
     return 0
 

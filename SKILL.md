@@ -1,100 +1,195 @@
-# StudySynth Lite — Operating Instructions (Lightweight Edition)
+# StudySynth Lite — Operating Instructions
 
-A high-performance, lightweight, drop-in edition of the StudySynth / Competitive Quiz skill. Delivers the exact same user-facing deliverables (standalone HTML study workspaces, master dashboard, desktop shortcuts, and print-ready A4 test PDFs) with dramatically fewer model calls, zero redundant intermediate artifacts, lower token consumption, and faster execution.
+A lightweight, drop-in edition of the StudySynth competitive-study skill. It keeps the
+same user-facing deliverables as the full edition — a validated question bank, a
+standalone HTML workspace, print-ready A4 A/B/C PDFs, a dashboard, and a coverage gate —
+with far fewer AI passes.
 
----
+## 1. Three execution layers
 
-## 1. Core Principles (L1–L6)
-
-- **L1 — Single-Pass Generation**: Extract knowledge units and generate high-yield competitive exam questions in a single, direct pass. No multi-pass extraction, second-pass blind sweeps, or 5-round gap-fill loops.
-- **L2 — Generalized Processing**: One standard workflow with sensible defaults. No user profiling, persona routing, or audience-specific prompt selection. Essential subject matter is derived solely from the source document.
-- **L3 — Deterministic Quality and Validation**: Maintain the established 11-dimension quality bar (`quality.py`), structural validation (`validate_questions.py`), anchor recall (`inventory_check.py`), and mathematical coverage (`coverage.py` + `gate.py`). Never bypass validation or lower quality standards.
-- **L4 — Inexpensive Deterministic Checks Over Model Critique**: Replace expensive LLM self-critique, blind redaction, and semantic review loops with deterministic validation, schema checks, and rubric evaluation.
-- **L5 — Localized Repair Only**: Repair specific defect items only when concrete validation failures occur. Never execute speculative full-bank regeneration or multi-round gap refinement by default.
-- **L6 — Strict Contract Parity**: The input interface (`--source`, `--run-id`, `--profile`, `--config`, etc.) and final deliverables (`quiz_package.json`, `quiz.html`, `pdf/*.pdf`, `output/index.html`) remain 100% contract-compatible with the full edition.
-
----
-
-## 2. Lean Execution Pipeline
-
-```
-SOURCE DOCUMENT (.pdf, .docx, .pptx, .xlsx, .txt, .md, .html)
-   │
-   ▼ [1. Receive & Prepare]
-deterministic ingest.py + anchors.py
-   │  → document_structure.json, anchors.json
-   ▼ [2. Generate directly]
-prompts/lite-generate.md OR scripts/generate_lite.py
-   │  → knowledge_inventory.json, question_bank.json (single pass)
-   ▼ [3. Deterministic Validation & Quality (Parallel)]
-validate_questions.py + quality.py + dedupe.py
-   │  → validation_results.json, quality_report.json, dedupe_report.json
-   ▼ [4. Coverage & Audit Gate]
-coverage.py + audit.py + gate.py
-   │  → coverage_matrix.json, audit_report.json, gate.json
-   ▼ [5. Package & Render (Parallel)]
-package.py + build_web.py + build_pdf.py + check_pdf.py
-   │  → quiz_package.json, quiz.html / [slug].html, pdf/*.pdf
-   ▼ [6. Delivery (Optional)]
-package_delivery.py + dashboard.py + desktop_shortcut.py
-   │  → output/index.html, OS shortcuts
-```
-
----
-
-## 3. Stages Removed vs Retained
-
-| Stage in Full Edition | Lite Edition Action | Rationale |
+| Layer | AI budget | Purpose |
 |---|---|---|
-| Ingest (`scripts/ingest.py`) | **Retained** | Essential for document parsing, table extraction, and normalization |
-| Anchors (`scripts/anchors.py`) | **Retained** | Deterministic, sub-second entity and date extraction for recall audit |
-| First-pass extraction (`extract.md`) | **Simplified** | Inlined into single-pass generator |
-| Locate excerpts (`locate_excerpts.py`) | **Retained/Inlined** | Fast deterministic span and offset verification |
-| Second-pass blind sweep (`second-pass.md`) | **Removed** | Eliminates redundant re-reading of identical blocks and diff tracking |
-| Classification pass (`classify.md`) | **Simplified** | Standardized tier assignments (Tier 1/2) generated directly |
-| Exam design blueprinting (`exam-design.md`) | **Simplified** | Generalized question distribution replaces heavy blueprint phase |
-| Batch question generation (`generate.md`) | **Simplified** | Direct generation replaces multiple 6-8 item batch requests |
-| Statement engine (`statement-engine.md`) | **Inlined** | Statement logic generated inline with question objects |
-| Blind re-solve review (`review-blind-batch.md`) | **Removed** | Deterministic `validate_questions.py` and `quality.py` catch ambiguities |
-| Semantic review (`review-semantic-batch.md`) | **Removed** | Deterministic 11-dimension quality engine already grades Rubric A–D |
-| Iterative gap-fill loop (`gap-fill.md`) | **Removed** | Replaced by single-pass complete coverage; local repair only if flagged |
-| Revision review prompt (`prompts/revision.md`) | **Removed** | Deterministic `scripts/revision.py` handles mastery algorithms |
-| Deterministic audit & gate (`audit.py`, `gate.py`) | **Retained** | Non-negotiable mathematical coverage and gate integrity |
-| Package & rendering (`package.py`, `build_web.py`, etc.) | **Retained** | Produces exact same user-facing standalone HTML and PDF deliverables |
+| **Full Python edition** | Multi-pass: extract, design, generate, review, gap-fill | Maximum depth and coverage |
+| **Lite Python edition** | **1 combined generation pass + at most 1 targeted repair pass** | Fast, cheaper packages |
+| **Mobile PWA** | **0 AI passes** | Offline, deterministic practice on a phone |
 
----
+The deterministic rule-based generator (`scripts/generate_lite.py`) is the **PWA engine**
+and a test-fixture generator. It is not the default Lite Python generation path.
 
-## 4. Drop-in CLI Usage
+## 2. Core principles
 
-The Lite edition provides `scripts/pipeline_lite.py` as a drop-in replacement for `scripts/pipeline.py`:
+- **L1 — One combined agent pass.** Read the prepared source once and write both the
+  knowledge inventory and the question bank. Do not split extraction, design, and
+  generation into separate model passes.
+- **L2 — Generalized processing.** One workflow with sensible defaults. No persona
+  routing or audience-specific prompt selection.
+- **L3 — Deterministic quality and validation.** Preserve the 11-dimension quality bar,
+  structural validation, anchor recall, coverage, audit, and gate.
+- **L4 — Deterministic checks over model critique.** Use scripts, schema checks, and
+  rubric scoring instead of blind re-solve or semantic review loops.
+- **L5 — Localized repair only.** If concrete validation failures occur, repair only the
+  listed items, once. Never regenerate the whole bank speculatively.
+- **L6 — Contract parity.** Keep the same input interface and final deliverables as the
+  full edition.
+
+## 3. Execution model
+
+```
+SOURCE DOCUMENT
+  |
+  |-- deterministic ingest.py + anchors.py
+  |      -> document_structure.json, anchors.json
+  |
+  |-- lite_handoff.json (when no inventory/bank is supplied)
+  |      -> prompt path, input paths, output paths, rerun command
+  |
+  |-- ONE combined agent pass (prompts/lite-generate.md)
+  |      -> knowledge_inventory.json
+  |      -> question_bank.json
+  |      -> llm_trace.jsonl
+  |
+  |-- deterministic validation and quality (parallel)
+  |      -> validation_results.json, quality_report.json, dedupe_report.json
+  |
+  |-- coverage + audit + gate
+  |      -> coverage_matrix.json, audit_report.json, gate.json
+  |
+  |-- package + render
+  |      -> quiz_package.json, quiz.html, pdf/*.pdf
+  |
+  |-- optional delivery
+         -> output/index.html, delivery files
+```
+
+The pipeline stops at the handoff instead of silently substituting the deterministic
+engine. The agent performs the one pass, writes the two files, records the pass, then
+reruns with `--inventory` and `--bank`.
+
+## 4. Model-call accounting
+
+`run_metrics_lite.json` reports `model_calls` from `llm_trace.jsonl`:
+
+- **1** — one combined generation pass.
+- **2** — generation plus one targeted repair pass.
+- **0** — a directly supplied bank with no Lite handoff, or an explicit
+  `--offline-engine` demo/test run.
+- **pending (agent generation)** — source-only handoff before the agent pass.
+- **unavailable** — a Lite handoff exists but the agent did not record a trace. The
+  pipeline never guesses zero in this case.
+
+Record passes with:
 
 ```bash
-# Complete end-to-end execution in Lite edition
+python scripts/record_lite_pass.py \
+  --run-dir <RUN_DIR> \
+  --stage lite_generate \
+  --pass-number 1
+```
+
+Use `--stage lite_repair` for the single optional repair pass. Do not claim zero calls
+when an agent pass actually occurred.
+
+## 5. CLI usage
+
+`scripts/pipeline.py` is a drop-in alias for `scripts/pipeline_lite.py`; both behave
+identically in this repository.
+
+### 5.1 Source-only handoff
+
+```bash
 python scripts/pipeline_lite.py \
   --source examples/sample_source.md \
   --run-id lite_run \
   --profile profiles/GENERAL_PSC.json \
   --config config.default.json \
   --full
+```
 
-# With existing or custom inventory and bank
+This writes `lite_handoff.json` and stops. Follow the printed instructions.
+
+### 5.2 Agent-generated bank
+
+```bash
+python scripts/pipeline_lite.py \
+  --source examples/sample_source.md \
+  --inventory build/lite_run/knowledge_inventory.json \
+  --bank build/lite_run/question_bank.json \
+  --run-id lite_run \
+  --profile profiles/GENERAL_PSC.json \
+  --config config.default.json \
+  --full
+```
+
+### 5.3 Existing or custom bank
+
+```bash
 python scripts/pipeline_lite.py \
   --source examples/sample_source.md \
   --inventory examples/sample_inventory.json \
-  --bank examples/sample_bank.json \
+  --bank examples/question_bank_apsc.json \
   --run-id lite_custom \
   --profile profiles/APSC_PRELIMS.json \
   --config config.default.json \
   --full
 ```
 
----
+`--inventory` and `--bank` must be supplied together. The bank is validated and packaged
+as-is; a `PARTIAL` gate means coverage gaps, not packaging failure.
 
-## 5. Output Verification
+### 5.4 Offline/demo engine
 
-Outputs match the full edition specification:
-- `quiz_package.json`: Contains validated, quality-accepted questions conforming to `quiz-package.schema.json`.
-- `quiz.html` / `[slug].html`: Standalone offline study desk with Practice, Test, Revision, and Analytics modes.
-- `pdf/question-paper-A.pdf`, `pdf/answer-key-B.pdf`, `pdf/explanations-C.pdf`: Print-ready A4 test documents verified by `check_pdf.py`.
-- `gate.json`: Authoritative gate status (`COMPREHENSIVE`, `PARTIAL`, or `LIMITED`).
-- `run_metrics_lite.json`: Performance benchmark report with stage timings and token/call metrics.
+```bash
+python scripts/pipeline_lite.py \
+  --source examples/sample_source.md \
+  --run-id offline_demo \
+  --build-dir build \
+  --full \
+  --offline-engine
+```
+
+This is the explicit deterministic path for tests, demos, and PWA parity fixtures. It is
+never the default.
+
+## 6. Agent prompt requirements
+
+`prompts/lite-generate.md` must produce:
+
+- `knowledge_inventory.json` with source-grounded atomic units, exact excerpts, tiers,
+  and source locations.
+- `question_bank.json` with four options per question, exactly one correct key, varied
+  cognitive forms, plausible source-grounded distractors, and explanations citing the
+  source.
+- 100% Tier 1 and Tier 2 primary coverage.
+- No unsupported facts under `SOURCE_BOUND`.
+
+The agent must not call `scripts/generate_lite.py` during the Lite Python path.
+
+## 7. Repair policy
+
+- Validation writes `repair_queue.json` containing only rejected items and reasons.
+- Repair only those items; keep accepted questions unchanged.
+- Record exactly one `lite_repair` pass.
+- Rerun with the same inventory and bank.
+- No second repair round and no full-bank regeneration.
+
+## 8. Output verification
+
+- `quiz_package.json`: validated, quality-accepted questions conforming to the package
+  schema.
+- `quiz.html` / `[slug].html`: standalone offline study workspace.
+- `pdf/question-paper-A.pdf`, `pdf/answer-key-B.pdf`, `pdf/explanations-C.pdf`: verified
+  by `check_pdf.py`.
+- `gate.json`: authoritative `COMPREHENSIVE`, `PARTIAL`, or `LIMITED` status.
+- `run_metrics_lite.json`: timings, model-call count, and LLM telemetry.
+- `lite_handoff.json`: pending agent handoff.
+- `llm_trace.jsonl`: truthful generation/repair pass record.
+
+## 9. What is intentionally removed
+
+- Second-pass blind sweep.
+- Separate classification and blueprint passes.
+- Multi-batch question generation.
+- Blind re-solve and semantic review loops.
+- Multi-round gap-fill.
+
+The deterministic audit, gate, packaging, HTML, and PDF stages are retained.

@@ -1,99 +1,198 @@
-# StudySynth Lite & Offline Android PWA
+# StudySynth Lite
 
-> **A Lightweight, Deterministic, 100% Offline Competitive Study Workspace, MCQ Generator, and Android PWA.**
+**A faster competitive-exam study pipeline, plus a fully offline Android PWA.**
 
-[![Vercel Deployment](https://img.shields.io/badge/Vercel-Live%20PWA-10b981?logo=vercel)](https://studysynth-pwa.vercel.app)
-[![Zero-LLM Offline](https://img.shields.io/badge/Engine-Deterministic%20Zero--LLM-3943d3)](#)
-[![Android PWA](https://img.shields.io/badge/Platform-Android%20%7C%20Web%20PWA-6366f1)](#)
+StudySynth Lite keeps the same output contract as the full StudySynth pipeline — a
+validated question bank, a standalone HTML study workspace, print-ready A/B/C PDFs, a
+dashboard, and a coverage gate — while using far fewer AI passes.
 
----
+## Three execution layers
 
-## 🌟 Overview
+| Layer | AI use | What it is for |
+|---|---|---|
+| **Full Python skill** | Many AI passes: extraction, design, generation, review, gap-fill | Maximum depth and coverage |
+| **Lite Python skill** | **One combined AI generation pass**, plus at most **one targeted repair pass** | Fast, cheaper end-to-end packages |
+| **Mobile PWA** | **Zero AI, zero network, fully deterministic** | Offline practice on an Android phone |
 
-StudySynth Lite delivers the full capabilities of the competitive study quiz workspace with **dramatically reduced intermediate processing, lower token consumption, zero hallucination risk, and instantaneous sub-second execution**.
+The deterministic rule-based question engine is the **PWA engine** and a test-fixture
+generator. It is not the default Lite Python generation path.
 
-It is delivered in two complementary editions:
+## What Lite Python does
 
-1. **Python CLI Pipeline (`scripts/pipeline_lite.py`):**
-   - High-throughput desktop runner for batch processing textbooks, PDF notes, and syllabus packages into interactive HTML workspaces and print-ready dual-column A4 test booklets.
-2. **Offline Android PWA (`pwa/`):**
-   - 100% client-side Progressive Web App running directly in mobile Chrome/Firefox on Android.
-   - Hosted live on Vercel: [https://studysynth-pwa.vercel.app](https://studysynth-pwa.vercel.app).
-   - Installable to the Android Home Screen with zero external network or API dependencies.
+1. **Prepare** — deterministic ingestion and anchor extraction.
+2. **Hand off** — stop with `lite_handoff.json` and ask for the single combined agent pass.
+3. **Generate** — the agent reads `prompts/lite-generate.md` once and writes:
+   - `knowledge_inventory.json`
+   - `question_bank.json`
+4. **Validate** — deterministic schema checks, quality scoring, duplicate detection,
+   anchor recall, coverage, audit, and gate.
+5. **Repair once (optional)** — if specific questions fail, repair only those items.
+6. **Package** — `quiz_package.json`, standalone HTML, A/B/C PDFs, dashboard, and
+   delivery files.
 
----
+There is no multi-round gap-fill loop and no expensive blind-review pass.
 
-## 🚀 Key Features
+## Quickstart (Lite Python)
 
-### 1. Deterministic Question Engine
-- **Zero Hallucination Risk:** Every factual MCQ, relationship distinction, and multi-statement UPSC-style question is deterministically derived from verified text anchors in the source document.
-- **11-Dimension Quality Compliance:** Balanced distractor lengths (±15% rule to eliminate answer-length leaks), rotated answer keys (`A`, `B`, `C`, `D`), and explicit distractor purpose mappings.
-- **Sub-Second Execution:** Completes full knowledge extraction and quiz synthesis in **<200 milliseconds** on mobile CPUs and **~1.5 seconds** on desktop Python.
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
 
-### 2. Multi-Mode Study Workspace
-- **💡 Practice Mode:** Instant feedback with comprehensive source citations and explanations.
-- **⏱️ Exam Mode:** Realistic exam timer, negative marking simulation, and complete scorecard analytics.
-- **📇 Revision Flashcards:** Active recall cards with tap-to-flip explanations.
-- **🖨️ Print-Ready A4 Booklet Export:** Dual-column question papers, answer keys, and explanations via browser print / ReportLab.
+# 2. Prepare the source and get the agent handoff
+python scripts/pipeline_lite.py \
+  --source examples/sample_source.md \
+  --run-id my_run \
+  --build-dir build \
+  --full
+```
 
-### 3. Local On-Device Ingestion & OCR
-- Native parsing of `.pdf`, `.docx`, `.md`, `.txt`, and `.json`.
-- In-browser local OCR engine (`pwa/engine/ocr.js`) using WebAssembly and Otsu adaptive binarization to extract text from physical textbook photos and low-contrast scanned notes.
+The first run stops after preparation and prints the prompt, the two output paths, and
+the exact rerun command. It does **not** silently generate a bank.
 
----
+```bash
+# 3. Run prompts/lite-generate.md once as the agent.
+#    Write the two files, then record the pass:
+python scripts/record_lite_pass.py \
+  --run-dir build/my_run \
+  --stage lite_generate \
+  --pass-number 1
 
-## 📁 Repository Structure
+# 4. Rerun with the generated files (use the command printed by step 2)
+python scripts/pipeline_lite.py \
+  --source examples/sample_source.md \
+  --inventory build/my_run/knowledge_inventory.json \
+  --bank build/my_run/question_bank.json \
+  --run-id my_run \
+  --build-dir build \
+  --full
+```
+
+If validation rejects items, `repair_queue.json` lists only those items. Repair them,
+record one `lite_repair` pass, and rerun. Do not run a second repair round.
+
+### Using an existing bank
+
+```bash
+python scripts/pipeline_lite.py \
+  --source examples/sample_source.md \
+  --inventory examples/sample_inventory.json \
+  --bank examples/question_bank_apsc.json \
+  --run-id supplied \
+  --build-dir build \
+  --full
+```
+
+A bank supplied directly, with no Lite handoff, reports `model_calls: 0`. If a run has a
+`lite_handoff.json` but no `llm_trace.jsonl`, metrics report the count as unavailable
+rather than guessing zero. A `PARTIAL` gate means the bank does not cover every knowledge
+unit or cognitive form; it does not mean packaging failed.
+
+### Offline/demo engine
+
+For tests, demos, and PWA parity fixtures only:
+
+```bash
+python scripts/pipeline_lite.py \
+  --source examples/sample_source.md \
+  --run-id offline_demo \
+  --build-dir build \
+  --full \
+  --offline-engine
+```
+
+This explicitly uses the deterministic engine and reports zero model calls.
+
+## Quickstart (Android PWA)
+
+1. Open the live app: [https://studysynth-pwa.vercel.app](https://studysynth-pwa.vercel.app)
+2. Install it from the browser menu (**Install app** / **Add to Home Screen**).
+3. Switch on Airplane mode. The app continues to work offline with local storage.
+
+The PWA opens on a **Library** that lists the bundled starter set plus every saved set.
+Each card exposes **Practice**, **Revision**, and **Exam Test** directly, so a saved PDF
+or note set is one tap away from the right study mode. On phones and compact tablets the
+navigation is a slide-out sidebar; on larger screens it stays docked. The quiz keeps the
+question and all options compact, then lets answer explanations flow into the same surface.
+When the page grows, it scrolls as one page while Previous/Next/Submit stay pinned at the
+bottom. Iconography is a locally bundled Material
+Symbols Rounded subset, so the interface uses Material 3 expressive icons and never asks
+for a remote icon font.
+
+The PWA parses text, Markdown, JSON, and text-layer PDFs locally. It bundles PDF.js for
+selectable PDFs and Tesseract for optional on-device OCR. If the OCR language data is
+missing, the app reports that OCR is unavailable and text-based ingestion still works.
+
+### Native Android APK (Capacitor)
+
+```bash
+npm install
+npm run android:sync      # builds www/ from pwa/ and syncs the Android project
+npm run android:apk       # writes android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Requirements: Node 22+, JDK 21, and Android SDK platform 36 with build-tools 36.
+The current APK is a **debug build** signed with the local debug key; use your own
+release keystore before distributing it. The native build disables the service worker
+because the web payload is already packaged inside the APK, and it still makes no
+network or AI calls. A copy of the verified build is kept at
+`output/StudySynth-v1.0-debug.apk`.
+
+## Output contract
+
+- `quiz_package.json` — validated, quality-accepted questions.
+- `quiz.html` / `[slug].html` — standalone offline study workspace.
+- `pdf/question-paper-A.pdf`, `pdf/answer-key-B.pdf`, `pdf/explanations-C.pdf`.
+- `pdf_check_report.json` — PDF verification result.
+- `gate.json` — `COMPREHENSIVE`, `PARTIAL`, or `LIMITED`.
+- `run_metrics_lite.json` — stage timings, model-call count, and LLM telemetry.
+- `lite_handoff.json` — pending agent-generation handoff (source-only runs).
+- `llm_trace.jsonl` — truthful record of generation and repair passes.
+
+## Repository layout
 
 ```
 studysynth-lite/
-├── SKILL.md                 # Lite Skill specification & operating instructions
-├── prompts/
-│   └── lite-generate.md     # Compact single-pass model prompt (<80 lines)
+├── SKILL.md                     # Lite operating instructions
+├── prompts/lite-generate.md     # One combined agent prompt
 ├── scripts/
-│   ├── generate_lite.py     # Deterministic knowledge extractor & MCQ synthesizer
-│   ├── pipeline_lite.py     # Fast 6-stage CLI coordinator (also aliased as pipeline.py)
-│   ├── quality.py           # 11-dimension question quality scoring engine
-│   ├── validate_questions.py# Structural & schema validation rules
-│   └── ...                  # Ingest, anchors, package, and render modules
-├── pwa/                     # 100% Offline Android Progressive Web App
-│   ├── index.html           # Main PWA application shell
-│   ├── styles.css           # Responsive design system matching original StudySynth
-│   ├── app.js               # Client controller & PWA lifecycle manager
-│   ├── manifest.webmanifest # Android PWA manifest (standalone, adaptive icons)
-│   ├── sw.js                # Bulletproof Service Worker (Cache-First offline strategy)
-│   ├── engine/              # Client-side generator, PDF parser, OCR, & IndexedDB storage
-│   └── assets/              # Icons and brand logo
-├── profiles/                # Exam profiles (UPSC, State PSCs, CBSE, Corporate)
-├── templates/               # HTML study workspace & PDF booklet templates
-└── tests/                   # Automated pytest and Node.js test suites
+│   ├── pipeline_lite.py         # Main Lite coordinator
+│   ├── pipeline.py              # Drop-in alias for pipeline_lite.py
+│   ├── generate_lite.py         # Offline/PWA deterministic engine (explicit only)
+│   ├── llm_trace.py             # Truthful pass telemetry
+│   ├── record_lite_pass.py      # Record one generation/repair pass
+│   ├── quality.py               # Quality scoring
+│   ├── validate_questions.py    # Structural validation
+│   └── ...                      # Ingest, anchors, packaging, rendering
+├── pwa/                         # Zero-LLM offline Android PWA
+├── android/                     # Capacitor Android project (debug APK)
+├── www/                         # Generated Capacitor web payload
+├── capacitor.config.json        # Native app id, name, and web directory
+├── profiles/                    # Exam profiles
+├── templates/                   # HTML and PDF templates
+└── tests/                       # Python and Node test suites
 ```
 
----
-
-## 💻 Quickstart (Python CLI)
+## Verification
 
 ```bash
-# Clone the repository
-git clone https://github.com/usm007/studysynth-lite.git
-cd studysynth-lite
-
-# Generate complete study package from a document
-python scripts/pipeline_lite.py --source examples/my_notes.pdf --out-dir build/my_test
-
-# Run tests
 pytest tests/test_skill_lite.py
+npm test --prefix pwa
 ```
 
----
+The Python suite covers the agent handoff, supplied-bank packaging, repair queue,
+trace-based call counting, HTML/PDF contracts, and the explicit offline engine. The PWA
+suite proves deterministic generation and answer-key rotation with no network or AI calls.
 
-## 📱 Quickstart (Android PWA)
+## Limitations
 
-1. Open the live app on your phone: [https://studysynth-pwa.vercel.app](https://studysynth-pwa.vercel.app)
-2. Tap the **"📲 Install App"** badge in the top bar (or browser menu ⋮ -> **"Install app"** / **"Add to Home Screen"**).
-3. Switch on Airplane mode — StudySynth runs 100% offline with full persistence in IndexedDB!
+- The Lite Python skill still needs one agent pass; it is not a zero-LLM pipeline.
+- The PWA exam mode uses +2.00/−0.66 marking and a scorecard; it does not attempt
+  sectional cut-offs or adaptive difficulty.
+- Optional PWA OCR requires the local Tesseract runtime and English language data.
+- The APK is debug-signed; a release build needs the operator's own keystore.
+- Coverage and gate status reflect the source and bank actually supplied; a small source
+  or a partial bank can legitimately produce a `PARTIAL` gate.
 
----
+## License
 
-## 📜 License
-
-MIT License. Designed and engineered for high-performance competitive study preparation.
+MIT License.

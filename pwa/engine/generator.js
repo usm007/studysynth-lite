@@ -128,6 +128,113 @@
     return d;
   }
 
+  function splitSubjectPredicate(clause) {
+    const text = cleanText(clause).replace(/[.,;:]+$/, '');
+    const m = text.match(/^(.{2,95}?)\s+(is|are|was|were|has|have|lacks?|contains?|includes?|rises?|rise|carries|carry|pumps?|forms?|lies|lie|remains?|becomes?|covers?|extends?|produces?|requires?|permits?|prohibits?|guarantees?|provides?|gives?|grants?|means?|refers?)\b\s*(.*)$/i);
+    if (!m) return null;
+    const subject = m[1].trim();
+    const predicate = (m[2] + ' ' + m[3]).trim();
+    if (subject.length < 2 || predicate.length < 5) return null;
+    return { subject, predicate };
+  }
+
+  // Deterministic false-statement builder.  It never uses randomness or a
+  // model call; the same source sentence always yields the same alternative.
+  function falsifyStatement(statement) {
+    const text = cleanText(statement);
+    if (!text) {
+      return { text: 'This statement is not supported by the source.', note: 'empty statement' };
+    }
+
+    // Two-subject contrast: swap the predicates so the facts are attached to
+    // the wrong subjects.  Reversing clause order would still be true.
+    const cm = text.match(/\s*(?:,\s*while|,?\s+whereas)\s+/i);
+    if (cm) {
+      let left = text.slice(0, cm.index).trim();
+      const right = text.slice(cm.index + cm[0].length).replace(/[.,;:]+$/, '').trim();
+      let prefix = '';
+      const pm = left.match(/^(Distinction|Difference|Definition)\s*:\s*(.+)$/i);
+      if (pm) {
+        prefix = pm[1] + ': ';
+        left = pm[2].trim();
+      }
+      const lp = splitSubjectPredicate(left);
+      const rp = splitSubjectPredicate(right);
+      if (lp && rp) {
+        const swapped = `${prefix}${lp.subject} ${rp.predicate}, whereas ${rp.subject} ${lp.predicate}.`;
+        if (swapped !== text) {
+          return {
+            text: swapped,
+            note: 'the predicates of the two contrasted subjects were swapped'
+          };
+        }
+      }
+    }
+
+    let m = text.match(/\b(1[5-9]\d\d|20\d\d)\b/);
+    if (m) {
+      const old = parseInt(m[1], 10);
+      return { text: text.replace(m[1], String(old + 3)), note: `the year ${old} was shifted` };
+    }
+
+    m = text.match(/\b(\d+(?:\.\d+)?)\b/);
+    if (m) {
+      const old = parseFloat(m[1]);
+      return { text: text.replace(m[1], String(old + 5)), note: 'the numerical value was altered' };
+    }
+
+    const numberWords = {
+      one: 'two', two: 'three', three: 'four', four: 'five', five: 'six',
+      six: 'seven', seven: 'eight', eight: 'nine', nine: 'ten', ten: 'eleven'
+    };
+    const nw = text.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\b/i);
+    if (nw) {
+      const old = nw[1];
+      return {
+        text: text.replace(old, numberWords[old.toLowerCase()]),
+        note: 'the stated number was altered'
+      };
+    }
+
+    // Remove an existing negation from a true negative claim.
+    const rm = text.match(/\b(should|must|can|could|would|do|does|did|is|are|was|were|has|have)\s+not\b(?!\s+only)/i);
+    if (rm) {
+      return {
+        text: text.slice(0, rm.index) + rm[1] + text.slice(rm.index + rm[0].length),
+        note: 'the negation was removed'
+      };
+    }
+    const cnm = text.match(/\bcannot\b/i);
+    if (cnm) {
+      return {
+        text: text.slice(0, cnm.index) + 'can' + text.slice(cnm.index + cnm[0].length),
+        note: 'the negation was removed'
+      };
+    }
+
+    const nm = text.match(/\b(is|are|was|were|has|have|can|shall|may|includes|include|covers|cover|comprises|comprise)\b/i);
+    if (nm) {
+      const word = nm[1];
+      const low = word.toLowerCase();
+      const scopeMap = {
+        includes: 'excludes', include: 'exclude',
+        covers: 'excludes', cover: 'exclude',
+        comprises: 'excludes', comprise: 'exclude'
+      };
+      const replacement = scopeMap[low] || (word + ' not');
+      const around = text.slice(Math.max(0, nm.index - 4), nm.index + word.length + 4).toLowerCase();
+      if (!around.includes('not')) {
+        return {
+          text: text.slice(0, nm.index) + replacement + text.slice(nm.index + word.length),
+          note: 'the assertion was negated'
+        };
+      }
+    }
+
+    const lead = text.replace(/^(The|A|An|This|These|Those|It)\b/, m => m.toLowerCase());
+    return { text: 'It is not true that ' + lead, note: 'the claim is asserted as false' };
+  }
+
   function buildKnowledgeInventory(sections) {
     const units = [];
     let kuCount = 0;
@@ -165,6 +272,7 @@
     const allStatements = inventory.map(u => u.statement);
     const stemSet = new Set();
     let keyCycle = 0;
+    let multiCycle = 0;
 
     for (let i = 0; i < inventory.length && questions.length < targetCount; i++) {
       const ku = inventory[i];
@@ -173,21 +281,57 @@
       const isDistinction = (i % 3 === 1) && inventory.length >= 2;
 
       if (isMultiStatement) {
-        // Multi-statement evaluation question (UPSC / Competitive Style)
-        const stmt1 = ku.statement;
+        // Multi-statement evaluation question (UPSC / Competitive Style).
+        // Truth patterns rotate deterministically so all four answer keys are
+        // reachable without any randomness or model call.
+        const pattern = multiCycle % 4;
+        multiCycle++;
+
+        const original1 = ku.statement;
         const otherKu = inventory[(i + 1) % inventory.length];
-        const stmt2 = otherKu ? otherKu.statement : 'The initiative operates under the nodal oversight of competent statutory authority.';
-        
+        const fallback2 = 'The initiative operates under the nodal oversight of competent statutory authority.';
+        const original2 = (otherKu && otherKu.statement && otherKu.statement !== original1)
+          ? otherKu.statement
+          : fallback2;
+
+        const false1 = falsifyStatement(original1);
+        const false2 = falsifyStatement(original2);
+
+        let text1 = original1;
+        let text2 = original2;
+        let truth1 = true;
+        let truth2 = true;
+        if (pattern === 1) {
+          text2 = false2.text;
+          truth2 = false;
+        } else if (pattern === 2) {
+          text1 = false1.text;
+          truth1 = false;
+        } else if (pattern === 3) {
+          text1 = false1.text;
+          text2 = false2.text;
+          truth1 = false;
+          truth2 = false;
+        }
+
+        const correctText = truth1 && truth2
+          ? 'Both 1 and 2'
+          : truth1
+            ? '1 only'
+            : truth2
+              ? '2 only'
+              : 'Neither 1 nor 2';
+
         const statements = [
-          { number: 1, text: stmt1 },
-          { number: 2, text: stmt2 }
+          { number: 1, text: text1, truth_value: truth1 },
+          { number: 2, text: text2, truth_value: truth2 }
         ];
 
         const opts = [
-          { key: 'A', text: '1 only', is_correct: false },
-          { key: 'B', text: '2 only', is_correct: false },
-          { key: 'C', text: 'Both 1 and 2', is_correct: true },
-          { key: 'D', text: 'Neither 1 nor 2', is_correct: false }
+          { key: 'A', text: '1 only', is_correct: correctText === '1 only' },
+          { key: 'B', text: '2 only', is_correct: correctText === '2 only' },
+          { key: 'C', text: 'Both 1 and 2', is_correct: correctText === 'Both 1 and 2' },
+          { key: 'D', text: 'Neither 1 nor 2', is_correct: correctText === 'Neither 1 nor 2' }
         ];
 
         // Assign purposes
@@ -199,6 +343,8 @@
           }
         }
 
+        const answerKey = opts.find(o => o.is_correct).key;
+
         // Unique focus snippet from statement
         const focusWords = ku.statement.split(' ').filter(w => w.length > 2).slice(0, 4).join(' ').replace(/[:.,;—-]+$/, '');
         let stem = `With reference to ${ku.section_title} (focusing on "${focusWords}"), consider the following statements:`;
@@ -206,6 +352,15 @@
           stem = `With reference to ${ku.section_title} [Item ${questions.length + 1}], consider the following statements:`;
         }
         stemSet.add(stem);
+
+        let explanation;
+        if (truth1 && truth2) {
+          explanation = `Both statements are verified directly from ${ku.section_title}: (1) ${original1} (2) ${original2}`;
+        } else {
+          explanation = `Statement 1 is ${truth1 ? 'correct' : 'incorrect'} and statement 2 is ${truth2 ? 'correct' : 'incorrect'}. Source: (1) ${original1} (2) ${original2}.`;
+          if (!truth1) explanation += ` The altered statement 1 is false because ${false1.note}.`;
+          if (!truth2) explanation += ` The altered statement 2 is false because ${false2.note}.`;
+        }
 
         questions.push({
           id: qid,
@@ -215,12 +370,12 @@
           statements: statements,
           purpose: 'statement_evaluation',
           options: opts,
-          answer_key: 'C',
+          answer_key: answerKey,
           knowledge_units: [{ ku_id: ku.ku_id, role: 'primary' }],
           source_title: ku.section_title,
           source_page: ku.source_page,
-          supporting_excerpt: stmt1.slice(0, 160),
-          explanation: `Both statements are verified directly from ${ku.section_title}: (1) ${stmt1} (2) ${stmt2}`,
+          supporting_excerpt: original1.slice(0, 160),
+          explanation: explanation,
           difficulty: 'medium',
           cognitive_level: 'understanding'
         });

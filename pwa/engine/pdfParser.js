@@ -7,11 +7,79 @@
 (function (global) {
   'use strict';
 
+  let pdfjsPromise = null;
+
+  async function loadPdfJs() {
+    if (!pdfjsPromise) {
+      pdfjsPromise = import('../vendor/pdfjs/pdf.mjs').then((pdfjs) => {
+        if (pdfjs.GlobalWorkerOptions) {
+          pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdfjs/pdf.worker.mjs', document.baseURI).href;
+        }
+        return pdfjs;
+      });
+    }
+    return pdfjsPromise;
+  }
+
   /**
-   * Extract text from ArrayBuffer of a PDF file offline.
-   * Parses standard PDF text markers (BT...ET, Tj, TJ) and handles uncompressed & deflate streams.
+   * Primary extractor: the bundled, same-origin PDF.js build. It handles
+   * compressed streams, object streams, Unicode maps, and multi-page files.
+   * Everything stays on the device.
    */
-  async function extractTextFromPDF(arrayBuffer) {
+  async function extractWithPdfJs(arrayBuffer, onProgress) {
+    const pdfjs = await loadPdfJs();
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      isEvalSupported: false,
+      useSystemFonts: true,
+      disableFontFace: true
+    });
+    const pdf = await loadingTask.promise;
+    const pages = [];
+
+    try {
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+        const page = await pdf.getPage(pageNumber);
+        const content = await page.getTextContent();
+        let pageText = '';
+        let previousWasEol = false;
+
+        for (const item of content.items) {
+          if (!item || typeof item.str !== 'string') continue;
+          if (item.str) pageText += item.str;
+          if (item.hasEOL) {
+            pageText += '\n';
+            previousWasEol = true;
+          } else if (item.str && !/\s$/.test(item.str)) {
+            pageText += ' ';
+            previousWasEol = false;
+          }
+        }
+
+        if (!previousWasEol) pageText += '\n';
+        const cleaned = pageText.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        if (cleaned) pages.push(`==Page ${pageNumber}==\n${cleaned}`);
+        page.cleanup();
+
+        if (onProgress) {
+          onProgress({
+            status: `Extracting PDF page ${pageNumber} of ${pdf.numPages}`,
+            progress: pageNumber / pdf.numPages
+          });
+        }
+      }
+    } finally {
+      try { await pdf.destroy(); } catch (e) { /* already closed */ }
+    }
+
+    return pages.join('\n\n');
+  }
+
+  /**
+   * Fallback extractor for environments where the module build cannot load.
+   * Parses standard PDF text markers (BT...ET, Tj, TJ).
+   */
+  async function extractWithFallback(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
     const textDecoder = new TextDecoder('latin1');
     const pdfRaw = textDecoder.decode(bytes);
@@ -64,6 +132,26 @@
     }
 
     throw new Error('No selectable text streams found in PDF. Note: Pure scanned image PDFs require OCR.');
+  }
+
+  async function extractTextFromPDF(arrayBuffer, onProgress) {
+    let primaryError = null;
+    try {
+      const text = await extractWithPdfJs(arrayBuffer, onProgress);
+      if (text && text.replace(/==Page \d+==/g, '').trim().length >= 25) return text;
+      primaryError = new Error('This PDF has no selectable text layer. It may be a scanned image PDF.');
+    } catch (err) {
+      primaryError = err;
+    }
+
+    try {
+      return await extractWithFallback(arrayBuffer);
+    } catch (fallbackError) {
+      if (primaryError && /password|encrypted/i.test(primaryError.message || '')) {
+        throw new Error('This PDF is password-protected. Unlock it first, then try again.');
+      }
+      throw new Error('No readable text was found in this PDF. For a scanned document, choose a clear photo of the page so the on-device OCR can read it.');
+    }
   }
 
   function parsePdfTextOperators(streamText) {
@@ -134,7 +222,7 @@
       }
     } else if (ext === 'pdf') {
       const buffer = await file.arrayBuffer();
-      return extractTextFromPDF(buffer);
+      return extractTextFromPDF(buffer, onProgress);
     } else {
       // TXT, Markdown, CSV, JSON
       return await file.text();

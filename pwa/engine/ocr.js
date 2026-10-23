@@ -75,37 +75,61 @@
    * Performs Local OCR on an Image, Canvas, or Blob using Tesseract.js
    * Supports progress callbacks to update Android UI.
    */
-  async function recognizeImage(imageSource, onProgress) {
-    if (typeof Tesseract === 'undefined') {
-      throw new Error('Tesseract OCR library is not loaded. Please ensure vendor/tesseract/tesseract.min.js is included.');
-    }
+  const OCR_PATHS = {
+    workerPath: './vendor/tesseract/worker.min.js',
+    corePath: './vendor/tesseract/tesseract-core-simd-lstm.wasm.js',
+    langPath: './vendor/tesseract'
+  };
 
-    if (onProgress) onProgress({ status: 'initializing OCR worker...', progress: 0.1 });
+  function getAvailability() {
+    if (typeof Tesseract === 'undefined') {
+      return {
+        available: false,
+        reason: 'Photo OCR is not bundled in this build. Use a .txt, .md, or selectable .pdf file instead.'
+      };
+    }
+    return { available: true, reason: '' };
+  }
+
+  async function recognizeImage(imageSource, onProgress) {
+    const availability = getAvailability();
+    if (!availability.available) throw new Error(availability.reason);
+
+    if (onProgress) onProgress({ status: 'Preparing on-device OCR', progress: 0.05 });
 
     let worker = null;
     try {
       worker = await Tesseract.createWorker('eng', 1, {
-        workerPath: './vendor/tesseract/worker.min.js',
-        corePath: './vendor/tesseract/tesseract-core.wasm.js',
+        workerPath: OCR_PATHS.workerPath,
+        corePath: OCR_PATHS.corePath,
+        langPath: OCR_PATHS.langPath,
+        // The language model is stored uncompressed so Android's asset packer
+        // cannot strip the .gz suffix and break the offline OCR fetch.
+        gzip: false,
         logger: (m) => {
-          if (onProgress && m.status === 'recognizing text') {
-            onProgress({ status: 'recognizing text', progress: m.progress });
+          if (!onProgress || !m) return;
+          if (m.status === 'recognizing text' && typeof m.progress === 'number') {
+            onProgress({ status: 'Recognising text', progress: Math.max(0.1, m.progress) });
+          } else if (m.status === 'loading language traineddata') {
+            onProgress({ status: 'Loading offline language data', progress: 0.15 });
+          } else if (m.status === 'initializing api') {
+            onProgress({ status: 'Starting OCR engine', progress: 0.25 });
           }
         }
       });
 
       const res = await worker.recognize(imageSource);
-      await worker.terminate();
-
       return {
         text: res.data.text || '',
         confidence: res.data.confidence || 0
       };
     } catch (err) {
+      const detail = err && err.message ? err.message : String(err);
+      throw new Error('On-device OCR could not run. ' + detail + ' Try a text, Markdown, or selectable PDF file instead.');
+    } finally {
       if (worker) {
-        try { await worker.terminate(); } catch (e) {}
+        try { await worker.terminate(); } catch (e) { /* already terminated */ }
       }
-      throw err;
     }
   }
 
@@ -118,15 +142,23 @@
       const url = URL.createObjectURL(file);
       img.onload = async () => {
         try {
+          const sourceWidth = img.naturalWidth || img.width;
+          const sourceHeight = img.naturalHeight || img.height;
+          if (!sourceWidth || !sourceHeight) throw new Error('The image has no readable dimensions.');
+
+          // Keep memory predictable on phones. OCR does not benefit from
+          // multi-thousand-pixel camera files.
+          const maxDimension = 2400;
+          const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
           const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth || img.width;
-          canvas.height = img.naturalHeight || img.height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0);
+          canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+          canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-          // Apply adaptive thresholding
           preprocessCanvas(canvas);
-
           const result = await recognizeImage(canvas, onProgress);
           URL.revokeObjectURL(url);
           resolve(result);
@@ -137,7 +169,7 @@
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
-        reject(new Error('Failed to load image for local OCR.'));
+        reject(new Error('Failed to load the image for local OCR.'));
       };
       img.src = url;
     });
@@ -146,7 +178,8 @@
   const LocalOCR = {
     preprocessCanvas,
     recognizeImage,
-    recognizeFile
+    recognizeFile,
+    getAvailability
   };
 
   if (typeof module !== 'undefined' && module.exports) {
