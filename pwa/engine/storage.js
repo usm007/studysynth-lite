@@ -7,12 +7,14 @@
   'use strict';
 
   const DB_NAME = 'StudySynthLiteDB';
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
   const STORE_MODULES = 'modules';
   const STORE_ATTEMPTS = 'attempts';
   const STORE_JOBS = 'jobs';
   const STORE_JOB_PAGES = 'jobPages';
   const STORE_JOB_INPUTS = 'jobInputs';
+  const STORE_REVISION_PROGRESS = 'revisionProgress';
+  const STORE_REVISION_SESSIONS = 'revisionSessions';
 
   let dbPromise = null;
 
@@ -42,8 +44,28 @@
           if (!db.objectStoreNames.contains(STORE_JOB_INPUTS)) {
             db.createObjectStore(STORE_JOB_INPUTS, { keyPath: 'jobId' });
           }
+          if (!db.objectStoreNames.contains(STORE_REVISION_PROGRESS)) {
+            const progress = db.createObjectStore(STORE_REVISION_PROGRESS, { keyPath: 'key' });
+            progress.createIndex('moduleId', 'moduleId', { unique: false });
+          }
+          if (!db.objectStoreNames.contains(STORE_REVISION_SESSIONS)) {
+            db.createObjectStore(STORE_REVISION_SESSIONS, { keyPath: 'moduleId' });
+          }
         };
-        req.onsuccess = (e) => resolve(e.target.result);
+        req.onsuccess = (e) => {
+          const db = e.target.result;
+          // Another tab that still holds the previous schema version is told to
+          // release its connection so a pending upgrade can complete instead of
+          // hanging the whole app.
+          db.onversionchange = () => {
+            try { db.close(); } catch (err) { /* already closed */ }
+            dbPromise = null;
+          };
+          resolve(db);
+        };
+        // A newer version upgrade blocked by another open connection: fall back
+        // to local storage for this session instead of hanging forever.
+        req.onblocked = () => resolve(null);
         req.onerror = () => resolve(null);
       });
     }
@@ -90,15 +112,38 @@
     const db = await getDB();
     if (db) {
       return new Promise((resolve) => {
-        const tx = db.transaction([STORE_MODULES], 'readwrite');
-        const store = tx.objectStore(STORE_MODULES);
-        store.delete(moduleId);
+        let tx;
+        try {
+          tx = db.transaction([STORE_MODULES, STORE_REVISION_PROGRESS, STORE_REVISION_SESSIONS], 'readwrite');
+        } catch (err) {
+          // A pre-revision database without the revision stores: still delete the module.
+          const fallbackTx = db.transaction([STORE_MODULES], 'readwrite');
+          fallbackTx.objectStore(STORE_MODULES).delete(moduleId);
+          fallbackTx.oncomplete = () => resolve(true);
+          fallbackTx.onerror = () => resolve(false);
+          return;
+        }
+        tx.objectStore(STORE_MODULES).delete(moduleId);
+        tx.objectStore(STORE_REVISION_SESSIONS).delete(moduleId);
+        const cursorReq = tx.objectStore(STORE_REVISION_PROGRESS).index('moduleId').openCursor(IDBKeyRange.only(moduleId));
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (!cursor) return;
+          cursor.delete();
+          cursor.continue();
+        };
         tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
       });
     } else {
       const list = JSON.parse(localStorage.getItem('studysynth_modules') || '[]');
       const filtered = list.filter(m => m.id !== moduleId);
       localStorage.setItem('studysynth_modules', JSON.stringify(filtered));
+      try {
+        localStorage.removeItem(localProgressKey(moduleId));
+        localStorage.removeItem(localSessionKey(moduleId));
+      } catch (e) { /* private mode */ }
       return true;
     }
   }
@@ -300,6 +345,152 @@
     });
   }
 
+  // ==========================================================================
+  // REVISION PROGRESS & SESSIONS
+  // ==========================================================================
+  function revisionRecordKey(moduleId, itemId) {
+    return String(moduleId) + '|' + String(itemId);
+  }
+
+  function localProgressKey(moduleId) {
+    return 'studysynth_revision_progress_' + String(moduleId);
+  }
+
+  function localSessionKey(moduleId) {
+    return 'studysynth_revision_session_' + String(moduleId);
+  }
+
+  function readLocalProgress(moduleId) {
+    try {
+      const raw = JSON.parse(localStorage.getItem(localProgressKey(moduleId)) || '{}');
+      return raw && typeof raw === 'object' ? raw : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  async function saveRevisionProgress(record) {
+    if (!record || !record.itemId || !record.moduleId) return false;
+    const value = Object.assign({}, record, {
+      key: revisionRecordKey(record.moduleId, record.itemId)
+    });
+    const db = await getDB();
+    if (db) return idbWrite(STORE_REVISION_PROGRESS, value);
+    try {
+      const map = readLocalProgress(record.moduleId);
+      map[record.itemId] = value;
+      localStorage.setItem(localProgressKey(record.moduleId), JSON.stringify(map));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function getRevisionProgress(moduleId) {
+    const db = await getDB();
+    if (db) {
+      const rows = await new Promise((resolve) => {
+        let tx;
+        try {
+          tx = db.transaction([STORE_REVISION_PROGRESS], 'readonly');
+        } catch (err) {
+          resolve([]);
+          return;
+        }
+        const req = tx.objectStore(STORE_REVISION_PROGRESS).index('moduleId').getAll(IDBKeyRange.only(moduleId));
+        req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+        req.onerror = () => resolve([]);
+      });
+      const map = {};
+      rows.forEach((row) => {
+        if (row && row.itemId) map[row.itemId] = row;
+      });
+      return map;
+    }
+    return readLocalProgress(moduleId);
+  }
+
+  async function resetRevisionProgress(moduleId) {
+    const db = await getDB();
+    if (db) {
+      await new Promise((resolve) => {
+        let tx;
+        try {
+          tx = db.transaction([STORE_REVISION_PROGRESS], 'readwrite');
+        } catch (err) {
+          resolve(false);
+          return;
+        }
+        const cursorReq = tx.objectStore(STORE_REVISION_PROGRESS).index('moduleId').openCursor(IDBKeyRange.only(moduleId));
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (!cursor) return;
+          cursor.delete();
+          cursor.continue();
+        };
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      });
+      return true;
+    }
+    try {
+      localStorage.removeItem(localProgressKey(moduleId));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function saveRevisionSession(session) {
+    if (!session || !session.moduleId) return false;
+    const db = await getDB();
+    if (db) return idbWrite(STORE_REVISION_SESSIONS, session);
+    try {
+      localStorage.setItem(localSessionKey(session.moduleId), JSON.stringify(session));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function getRevisionSession(moduleId) {
+    const db = await getDB();
+    if (db) return idbRead(STORE_REVISION_SESSIONS, 'get', moduleId);
+    try {
+      const raw = localStorage.getItem(localSessionKey(moduleId));
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function deleteRevisionSession(moduleId) {
+    const db = await getDB();
+    if (db) {
+      await new Promise((resolve) => {
+        let tx;
+        try {
+          tx = db.transaction([STORE_REVISION_SESSIONS], 'readwrite');
+        } catch (err) {
+          resolve(false);
+          return;
+        }
+        tx.objectStore(STORE_REVISION_SESSIONS).delete(moduleId);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      });
+      return true;
+    }
+    try {
+      localStorage.removeItem(localSessionKey(moduleId));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Bookmark helpers
   function getBookmarks() {
     try {
@@ -338,7 +529,14 @@
     saveJobInput,
     getJobInput,
     saveJobPage,
-    getJobPages
+    getJobPages,
+    revisionRecordKey,
+    saveRevisionProgress,
+    getRevisionProgress,
+    resetRevisionProgress,
+    saveRevisionSession,
+    getRevisionSession,
+    deleteRevisionSession
   };
 
   if (typeof module !== 'undefined' && module.exports) {

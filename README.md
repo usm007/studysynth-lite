@@ -108,7 +108,7 @@ This explicitly uses the deterministic engine and reports zero model calls.
 2. Install it from the browser menu (**Install app** / **Add to Home Screen**).
 3. Switch on Airplane mode. The app continues to work offline with local storage.
 
-The PWA opens on a **Library** that lists the bundled starter set plus every saved set.
+The PWA opens on a **Library** that lists every saved set on the device.
 Each card exposes **Practice**, **Revision**, and **Exam Test** directly, so a saved PDF
 or note set is one tap away from the right study mode. On phones and compact tablets the
 navigation is a slide-out sidebar; on larger screens it stays docked. The quiz keeps the

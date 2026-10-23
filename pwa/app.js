@@ -9,7 +9,7 @@
   const MODE_LABELS = {
     practice: 'Practice Mode',
     test: 'Exam Test (Timed)',
-    revision: 'Revision Flashcards',
+    revision: 'Adaptive Revision',
     generator: 'Generator',
     library: 'Offline Library'
   };
@@ -20,7 +20,6 @@
   const State = {
     activeMode: 'library',
     currentModule: null,
-    starterModule: null,
     currentIndex: 0,
     practiceAnswers: {},
     practiceRevealed: false,
@@ -38,8 +37,17 @@
     timerInterval: null,
     deferredInstallPrompt: null,
     lastResult: null,
-    cardIdx: 0,
-    cardFlipped: false,
+    revision: {
+      items: null,
+      itemsFor: null,
+      progress: {},
+      session: null,
+      resumeCandidate: null,
+      revealed: false,
+      viewingPrev: false,
+      expandedEvidence: false,
+      saving: false
+    },
     storagePersistent: false,
     isNative: false,
     swControllerReloaded: false,
@@ -68,6 +76,7 @@
 
     DOM.modeItems = document.querySelectorAll('.mode-item');
     DOM.railAcc = document.getElementById('railAcc');
+    DOM.railAccLabel = document.getElementById('railAccLabel');
     DOM.railBar = document.getElementById('railBar');
     DOM.railSub = document.getElementById('railSub');
     DOM.netStatus = document.getElementById('netStatus');
@@ -113,10 +122,46 @@
     DOM.chipDemoScience = document.getElementById('chipDemoScience');
     DOM.generateBtn = document.getElementById('generateBtn');
 
-    DOM.flashcardBox = document.getElementById('flashcardBox');
-    DOM.flashcardCount = document.getElementById('flashcardCount');
-    DOM.prevCardBtn = document.getElementById('prevCardBtn');
-    DOM.nextCardBtn = document.getElementById('nextCardBtn');
+    DOM.revisionUnavailable = document.getElementById('revisionUnavailable');
+    DOM.revisionDashboard = document.getElementById('revisionDashboard');
+    DOM.revisionSession = document.getElementById('revisionSession');
+    DOM.revisionSummary = document.getElementById('revisionSummary');
+    DOM.revDashTitle = document.getElementById('revDashTitle');
+    DOM.revDashTopic = document.getElementById('revDashTopic');
+    DOM.revResetBtn = document.getElementById('revResetBtn');
+    DOM.revStatDue = document.getElementById('revStatDue');
+    DOM.revStatNew = document.getElementById('revStatNew');
+    DOM.revStatLearning = document.getElementById('revStatLearning');
+    DOM.revStatConsistent = document.getElementById('revStatConsistent');
+    DOM.revStatTotal = document.getElementById('revStatTotal');
+    DOM.revDashNote = document.getElementById('revDashNote');
+    DOM.revStartBtn = document.getElementById('revStartBtn');
+    DOM.revResumeBtn = document.getElementById('revResumeBtn');
+    DOM.revPos = document.getElementById('revPos');
+    DOM.revPauseBtn = document.getElementById('revPauseBtn');
+    DOM.revProgress = document.getElementById('revProgress');
+    DOM.revProgressBar = document.getElementById('revProgressBar');
+    DOM.revForm = document.getElementById('revForm');
+    DOM.revPrompt = document.getElementById('revPrompt');
+    DOM.revAnswer = document.getElementById('revAnswer');
+    DOM.revAnswerText = document.getElementById('revAnswerText');
+    DOM.revSourceRef = document.getElementById('revSourceRef');
+    DOM.revEvidenceShort = document.getElementById('revEvidenceShort');
+    DOM.revEvidenceFull = document.getElementById('revEvidenceFull');
+    DOM.revEvidenceToggle = document.getElementById('revEvidenceToggle');
+    DOM.revRecallHint = document.getElementById('revRecallHint');
+    DOM.revRevealBtn = document.getElementById('revRevealBtn');
+    DOM.revBackBtn = document.getElementById('revBackBtn');
+    DOM.revPrevBtn = document.getElementById('revPrevBtn');
+    DOM.revRatings = document.getElementById('revRatings');
+    DOM.revSumReviewed = document.getElementById('revSumReviewed');
+    DOM.revSumAgain = document.getElementById('revSumAgain');
+    DOM.revSumHard = document.getElementById('revSumHard');
+    DOM.revSumGood = document.getElementById('revSumGood');
+    DOM.revSumEasy = document.getElementById('revSumEasy');
+    DOM.revSumRemaining = document.getElementById('revSumRemaining');
+    DOM.revSumNext = document.getElementById('revSumNext');
+    DOM.revSummaryDoneBtn = document.getElementById('revSummaryDoneBtn');
 
     DOM.libraryContainer = document.getElementById('libraryContainer');
     DOM.libraryGenerateBtn = document.getElementById('libraryGenerateBtn');
@@ -316,12 +361,14 @@
     State.isNative = isNativeApp();
 
     if (State.isNative) {
-      markInstalled('On device');
+      // The Android shell is already installed; never show an install sticker.
+      if (DOM.installBadge) {
+        DOM.installBadge.hidden = true;
+        DOM.installBadge.remove();
+        DOM.installBadge = null;
+      }
       // window.print() is a no-op inside an Android WebView.
       if (DOM.printBtn) DOM.printBtn.hidden = true;
-      if (DOM.installBadge) {
-        DOM.installBadge.addEventListener('click', () => showToast('This is the installed StudySynth app. It works fully offline.'));
-      }
       return;
     }
 
@@ -472,7 +519,7 @@
       DOM.themeToggle.setAttribute('aria-label', theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
     }
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', theme === 'dark' ? '#121826' : '#3943d3');
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#101011' : '#3943d3');
   }
 
   function initTheme() {
@@ -496,10 +543,14 @@
   // ==========================================================================
   function switchMode(mode) {
     if (!MODE_LABELS[mode]) mode = 'library';
+    if ((mode === 'practice' || mode === 'revision' || mode === 'test') && !State.currentModule) {
+      showToast('Choose a saved set from the Library to start studying.');
+      mode = 'library';
+    }
     const activeQuestionCount = State.currentModule && Array.isArray(State.currentModule.questions)
       ? State.currentModule.questions.length
       : 0;
-    if ((mode === 'practice' || mode === 'test') && State.currentModule && activeQuestionCount === 0) {
+    if ((mode === 'practice' || mode === 'test') && activeQuestionCount === 0) {
       mode = 'revision';
       showToast('This set is revision-only because no MCQs passed source verification.');
     }
@@ -540,7 +591,7 @@
     updateTestScreen();
 
     if (mode === 'revision') {
-      renderFlashcard();
+      openRevision();
     } else if (mode === 'library') {
       renderLibrary();
     } else if (isQuiz && !testSetup) {
@@ -703,52 +754,20 @@
   // ==========================================================================
   // MODULE LOADING
   // ==========================================================================
-  function analyzeSource(rawText, title, sourceMeta, targetCount) {
-    return window.StudySynthAnalysis.analyzeSource(rawText, title, sourceMeta, targetCount);
-  }
-
-  function buildModule(rawText, title) {
-    const analyzed = analyzeSource(rawText, title, null, 10);
-    if (analyzed.generationError) throw analyzed.generationError;
-    return {
-      id: 'mod_initial',
-      title: title,
-      createdAt: new Date().toISOString(),
-      durationMs: 45,
-      sectionsCount: analyzed.sections.length,
-      inventory: analyzed.inventory,
-      questions: analyzed.questions,
-      validation: analyzed.validation,
-      generation: analyzed.generation
-    };
-  }
-
-  function loadInitialModule() {
-    try {
-      const raw = window.StudySamples ? window.StudySamples.newspaper_2026 : '';
-      const title = 'SPM IAS Academy — 19 Oct 2026';
-      const module = buildModule(raw, title);
-      if (!module.questions.length) throw new Error('No questions could be generated from the starter notes.');
-      module.id = 'mod_starter_spm_2026';
-      module.bundled = true;
-      State.starterModule = module;
-      setModule(module);
-    } catch (err) {
-      if (DOM.qContainer) {
-        DOM.qContainer.innerHTML = '<div class="empty-state">The starter quiz could not be generated. Open the Generator to load your own notes.</div>';
-      }
-      console.error('StudySynth starter module failed:', err);
-    }
-  }
-
   function setModule(mod) {
     State.currentModule = mod;
     resetExamState();
     State.currentIndex = 0;
     State.practiceAnswers = {};
     State.practiceRevealed = false;
-    State.cardIdx = 0;
-    State.cardFlipped = false;
+    State.revision.items = null;
+    State.revision.itemsFor = null;
+    State.revision.progress = {};
+    State.revision.session = null;
+    State.revision.resumeCandidate = null;
+    State.revision.revealed = false;
+    State.revision.viewingPrev = false;
+    State.revision.expandedEvidence = false;
     State.lastResult = null;
 
     const questionCount = Array.isArray(mod.questions) ? mod.questions.length : 0;
@@ -765,12 +784,10 @@
       if (DOM.progBar) DOM.progBar.style.width = '0%';
       if (DOM.progPct) DOM.progPct.textContent = '0%';
       renderPalette();
-      renderFlashcard();
       return;
     }
     renderQuestion();
     renderPalette();
-    renderFlashcard();
   }
 
   // ==========================================================================
@@ -948,6 +965,27 @@
 
   function updateStats() {
     if (!State.currentModule) return;
+    if (State.activeMode === 'revision') {
+      const engine = revisionEngine();
+      const items = currentRevisionItems();
+      const stats = engine && items.length
+        ? engine.getModuleRevisionStats(items, State.revision.progress, Date.now())
+        : null;
+      const reviewed = stats ? Math.max(0, stats.total - stats.newItems) : 0;
+      if (DOM.liveAccNum) DOM.liveAccNum.textContent = stats ? String(stats.due) : '—';
+      if (DOM.statCorrect) DOM.statCorrect.textContent = stats ? String(stats.newItems) : '–';
+      if (DOM.statWrong) DOM.statWrong.textContent = stats ? String(stats.learning) : '–';
+      if (DOM.railAccLabel) DOM.railAccLabel.textContent = 'Revision Queue';
+      if (DOM.railAcc) DOM.railAcc.textContent = stats ? `${stats.due}` : '—';
+      if (DOM.railBar) DOM.railBar.style.width = stats && stats.total ? `${Math.round((reviewed / stats.total) * 100)}%` : '0%';
+      if (DOM.railSub) {
+        DOM.railSub.textContent = stats
+          ? `${stats.due} due now · ${stats.newItems} new · ${stats.total} items`
+          : 'No revision items';
+      }
+      return;
+    }
+    if (DOM.railAccLabel) DOM.railAccLabel.textContent = 'Session Score';
     const resultsHidden = State.activeMode === 'test' && !State.testSubmitted;
     const total = activeQuestionList().length;
 
@@ -1737,51 +1775,464 @@
   }
 
   // ==========================================================================
-  // FLASHCARDS
+  // REVISION — adaptive, evidence-backed recall
   // ==========================================================================
-  function renderFlashcard() {
-    if (!DOM.flashcardBox || !State.currentModule) return;
-    const units = State.currentModule.inventory || [];
-    if (!units.length) {
-      DOM.flashcardBox.innerHTML = '<p class="empty-state">No knowledge units available in this module.</p>';
-      if (DOM.flashcardCount) DOM.flashcardCount.textContent = 'Card 0 of 0';
+  function revisionEngine() {
+    return typeof window !== 'undefined' ? window.StudySynthRevision || null : null;
+  }
+
+  // Cards are derived from the saved module content and rebuilt only when the
+  // active module changes, so switching modules never reuses another queue.
+  function currentRevisionItems() {
+    if (!State.currentModule) return [];
+    const moduleId = State.currentModule.id;
+    if (State.revision.itemsFor !== moduleId || !Array.isArray(State.revision.items)) {
+      const engine = revisionEngine();
+      State.revision.items = engine ? engine.buildRevisionItems(State.currentModule) : [];
+      State.revision.itemsFor = moduleId;
+      State.revision.session = null;
+      State.revision.resumeCandidate = null;
+      State.revision.progress = {};
+      State.revision.revealed = false;
+      State.revision.viewingPrev = false;
+      State.revision.expandedEvidence = false;
+    }
+    return State.revision.items;
+  }
+
+  function revisionItemById(id) {
+    return currentRevisionItems().find((item) => item && item.id === id) || null;
+  }
+
+  function showRevisionPanel(panel) {
+    if (DOM.revisionDashboard) DOM.revisionDashboard.hidden = panel !== 'dashboard';
+    if (DOM.revisionSession) DOM.revisionSession.hidden = panel !== 'session';
+    if (DOM.revisionSummary) DOM.revisionSummary.hidden = panel !== 'summary';
+    if (DOM.revisionUnavailable) DOM.revisionUnavailable.hidden = panel !== 'unavailable';
+  }
+
+  function showRevisionUnavailable(message) {
+    if (DOM.revisionUnavailable) DOM.revisionUnavailable.textContent = message;
+    showRevisionPanel('unavailable');
+  }
+
+  function formatRevisionWhen(timestamp, now) {
+    if (!timestamp) return '';
+    const diff = timestamp - now;
+    if (diff <= 0) return 'now';
+    const minutes = Math.round(diff / 60000);
+    if (minutes < 60) return `in ${minutes} minute${minutes === 1 ? '' : 's'}`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `in ${hours} hour${hours === 1 ? '' : 's'}`;
+    const days = Math.round(hours / 24);
+    if (days < 30) return `in ${days} day${days === 1 ? '' : 's'}`;
+    const months = Math.round(days / 30);
+    return `in about ${months} month${months === 1 ? '' : 's'}`;
+  }
+
+  async function readRevisionSession(moduleId) {
+    try {
+      if (window.OfflineStorage && window.OfflineStorage.getRevisionSession) {
+        return await window.OfflineStorage.getRevisionSession(moduleId);
+      }
+    } catch (e) { /* storage unavailable */ }
+    return null;
+  }
+
+  function isResumableSession(session) {
+    return !!(session && Array.isArray(session.itemIds) && session.itemIds.length && !session.completed);
+  }
+
+  // Due status is always recomputed from persisted timestamps on open.
+  async function openRevision() {
+    const engine = revisionEngine();
+    if (!DOM.revisionDashboard) return;
+
+    State.revision.revealed = false;
+    State.revision.viewingPrev = false;
+    State.revision.expandedEvidence = false;
+
+    if (!State.currentModule) {
+      showRevisionUnavailable('Choose a saved set from the Library before revising.');
+      return;
+    }
+    if (!engine) {
+      showRevisionUnavailable('The revision engine could not be loaded. Reload the app and try again.');
       return;
     }
 
-    if (State.cardIdx >= units.length) State.cardIdx = 0;
-    const unit = units[State.cardIdx];
-    if (DOM.flashcardCount) {
-      DOM.flashcardCount.textContent = `Card ${State.cardIdx + 1} of ${units.length}`;
+    const items = currentRevisionItems();
+    if (!items.length) {
+      showRevisionUnavailable('This set has no source text that can be revised safely. Add clearer notes or a selectable PDF and try again.');
+      return;
     }
 
-    if (!State.cardFlipped) {
-      DOM.flashcardBox.innerHTML = `
-        <span class="flashcard-kicker">${escapeHtml(unit.section_title || 'Knowledge unit')}</span>
-        <h3 class="flashcard-title">${escapeHtml(unit.anchor || 'Core fact')}</h3>
-        <p class="flashcard-prompt">Tap card to reveal verified explanation</p>
-      `;
-      DOM.flashcardBox.setAttribute('aria-label', 'Flashcard front. Activate to reveal the answer.');
-    } else {
-      DOM.flashcardBox.innerHTML = `
-        <span class="flashcard-kicker is-revealed">Knowledge unit ${escapeHtml(unit.ku_id || '')}</span>
-        <p class="flashcard-answer">${escapeHtml(unit.statement || '')}</p>
-        <div class="flashcard-source">Source page: ${escapeHtml(unit.source_page || 'n/a')}</div>
-      `;
-      DOM.flashcardBox.setAttribute('aria-label', 'Flashcard answer. Activate to hide the answer.');
+    try {
+      if (window.OfflineStorage && window.OfflineStorage.getRevisionProgress) {
+        State.revision.progress = (await window.OfflineStorage.getRevisionProgress(State.currentModule.id)) || {};
+      }
+    } catch (e) {
+      State.revision.progress = {};
+      showToast('Revision progress could not be read on this device.');
     }
 
-    DOM.flashcardBox.onclick = () => {
-      State.cardFlipped = !State.cardFlipped;
-      renderFlashcard();
-    };
+    const saved = await readRevisionSession(State.currentModule.id);
+    State.revision.resumeCandidate = isResumableSession(saved) ? saved : null;
+    State.revision.session = null;
+
+    renderRevisionDashboard();
+    showRevisionPanel('dashboard');
+    updateStats();
   }
 
-  function moveCard(delta) {
-    const total = State.currentModule ? (State.currentModule.inventory || []).length : 0;
-    if (!total) return;
-    State.cardIdx = (State.cardIdx + delta + total) % total;
-    State.cardFlipped = false;
-    renderFlashcard();
+  function renderRevisionDashboard() {
+    const engine = revisionEngine();
+    const mod = State.currentModule;
+    if (!DOM.revisionDashboard || !engine || !mod) return;
+
+    const items = currentRevisionItems();
+    const now = Date.now();
+    const stats = engine.getModuleRevisionStats(items, State.revision.progress, now);
+
+    if (DOM.revDashTitle) DOM.revDashTitle.textContent = mod.title || 'Revision';
+    if (DOM.revDashTopic) DOM.revDashTopic.textContent = 'Evidence-backed recall, scheduled on this device.';
+    if (DOM.revStatDue) DOM.revStatDue.textContent = String(stats.due);
+    if (DOM.revStatNew) DOM.revStatNew.textContent = String(stats.newItems);
+    if (DOM.revStatLearning) DOM.revStatLearning.textContent = String(stats.learning);
+    if (DOM.revStatConsistent) DOM.revStatConsistent.textContent = String(stats.consistent);
+    if (DOM.revStatTotal) DOM.revStatTotal.textContent = String(stats.total);
+
+    const startable = stats.due + stats.newItems;
+    if (DOM.revStartBtn) {
+      DOM.revStartBtn.disabled = startable === 0;
+      DOM.revStartBtn.textContent = stats.total <= engine.DEFAULT_SESSION_SIZE
+        ? `Start revision (${startable} item${startable === 1 ? '' : 's'})`
+        : 'Start revision';
+    }
+
+    const resumable = isResumableSession(State.revision.resumeCandidate);
+    if (DOM.revResumeBtn) {
+      DOM.revResumeBtn.hidden = !resumable;
+      if (resumable) {
+        const position = Math.min(State.revision.resumeCandidate.cursor + 1, State.revision.resumeCandidate.itemIds.length);
+        DOM.revResumeBtn.textContent = `Resume session (item ${position} of ${State.revision.resumeCandidate.itemIds.length})`;
+      }
+    }
+
+    let note;
+    if (startable === 0) {
+      note = 'Nothing is due right now. Every item you have reviewed is scheduled ahead; new items will appear here once you add content.';
+      if (stats.nextDueAt) {
+        note = `Nothing is due right now. The next item returns ${formatRevisionWhen(stats.nextDueAt, now)}.`;
+      }
+      if (stats.newItems === 0 && stats.consistent > 0 && !stats.nextDueAt) {
+        note = 'Nothing is due right now. You have recalled every item in this set consistently.';
+      }
+    } else {
+      const parts = [];
+      if (stats.due) parts.push(`${stats.due} due`);
+      if (stats.newItems) parts.push(`${stats.newItems} new`);
+      note = `A session draws up to ${engine.DEFAULT_SESSION_SIZE} items, taking ${parts.join(' and ')} first, then long-interval items that are becoming stale.`;
+      if (stats.due === 0) note = `No item is due yet. A session will start with the ${stats.newItems} new item${stats.newItems === 1 ? '' : 's'}; already-reviewed items return when scheduled.`;
+    }
+    if (DOM.revDashNote) DOM.revDashNote.textContent = note;
+
+    if (DOM.setTitle) DOM.setTitle.textContent = `${stats.total} REVISION ITEM${stats.total === 1 ? '' : 'S'}`;
+    if (DOM.setTopic) DOM.setTopic.textContent = mod.title || 'Revision';
+  }
+
+  async function revisionAttempts(moduleId) {
+    try {
+      if (window.OfflineStorage && window.OfflineStorage.getAttempts) {
+        const list = await window.OfflineStorage.getAttempts(moduleId);
+        return Array.isArray(list) ? list : [];
+      }
+    } catch (e) { /* storage unavailable */ }
+    return [];
+  }
+
+  async function persistRevisionSession() {
+    const session = State.revision.session;
+    if (!session || !window.OfflineStorage) return;
+    try {
+      if (session.completed) await window.OfflineStorage.deleteRevisionSession(session.moduleId);
+      else await window.OfflineStorage.saveRevisionSession(session);
+    } catch (e) {
+      showToast('This session could not be saved on this device.');
+    }
+  }
+
+  async function startRevisionSession() {
+    const engine = revisionEngine();
+    const mod = State.currentModule;
+    if (!engine || !mod) return;
+    const items = currentRevisionItems();
+    const attempts = await revisionAttempts(mod.id);
+    const session = engine.buildSession(items, State.revision.progress, attempts, {
+      now: Date.now(),
+      size: engine.DEFAULT_SESSION_SIZE,
+      moduleId: mod.id,
+      questions: Array.isArray(mod.questions) ? mod.questions : []
+    });
+
+    if (!session.itemIds.length) {
+      State.revision.session = null;
+      State.revision.resumeCandidate = null;
+      renderRevisionDashboard();
+      showRevisionPanel('dashboard');
+      showToast('Nothing is due right now. Your next item returns when its interval ends.');
+      return;
+    }
+
+    State.revision.session = session;
+    State.revision.resumeCandidate = null;
+    State.revision.revealed = false;
+    State.revision.viewingPrev = false;
+    State.revision.expandedEvidence = false;
+    await persistRevisionSession();
+    renderRevisionSession();
+    showRevisionPanel('session');
+    updateStats();
+  }
+
+  function resumeRevisionSession() {
+    const engine = revisionEngine();
+    if (!engine) return;
+    const restored = engine.resumeSession(State.revision.resumeCandidate, currentRevisionItems());
+    if (!restored || !restored.itemIds.length) {
+      State.revision.resumeCandidate = null;
+      showToast('The saved session no longer matches this set. Starting fresh.');
+      renderRevisionDashboard();
+      showRevisionPanel('dashboard');
+      return;
+    }
+    State.revision.session = restored;
+    State.revision.revealed = false;
+    State.revision.viewingPrev = false;
+    State.revision.expandedEvidence = false;
+    renderRevisionSession();
+    showRevisionPanel('session');
+    updateStats();
+  }
+
+  function renderRevisionSession() {
+    const session = State.revision.session;
+    if (!session || !DOM.revisionSession) return;
+    const total = session.itemIds.length;
+    if (session.cursor >= total) {
+      finishRevisionSession();
+      return;
+    }
+
+    const viewingPrev = State.revision.viewingPrev && session.cursor > 0;
+    const index = viewingPrev ? session.cursor - 1 : session.cursor;
+    const card = revisionItemById(session.itemIds[index]);
+    if (!card) {
+      // The saved session referenced an item that no longer exists.
+      session.cursor = Math.min(Math.max(index + 1, session.cursor), total);
+      if (session.cursor >= total) { finishRevisionSession(); return; }
+      State.revision.viewingPrev = false;
+      renderRevisionSession();
+      return;
+    }
+
+    if (DOM.revPos) DOM.revPos.textContent = `Item ${session.cursor + 1} of ${total}`;
+    const pct = total ? Math.round((session.cursor / total) * 100) : 0;
+    if (DOM.revProgressBar) DOM.revProgressBar.style.width = `${pct}%`;
+    if (DOM.revProgress) DOM.revProgress.setAttribute('aria-valuenow', String(pct));
+
+    if (DOM.revForm) DOM.revForm.textContent = card.formLabel || 'Recall';
+    if (DOM.revPrompt) DOM.revPrompt.textContent = card.prompt || '';
+
+    const revealed = viewingPrev || State.revision.revealed;
+    if (DOM.revAnswer) DOM.revAnswer.hidden = !revealed;
+    if (revealed) {
+      if (DOM.revAnswerText) DOM.revAnswerText.textContent = card.answer || '';
+      renderRevisionEvidence(card);
+    }
+
+    const canRate = revealed && !viewingPrev && !session.completed;
+    if (DOM.revRatings) DOM.revRatings.hidden = !canRate;
+    if (DOM.revRevealBtn) DOM.revRevealBtn.hidden = revealed;
+    if (DOM.revBackBtn) DOM.revBackBtn.hidden = !viewingPrev;
+    if (DOM.revRecallHint) DOM.revRecallHint.hidden = revealed;
+    if (DOM.revPrevBtn) DOM.revPrevBtn.hidden = viewingPrev || session.cursor === 0;
+  }
+
+  function renderRevisionEvidence(card) {
+    const section = card.sectionTitle || 'Source';
+    const page = Number.isFinite(card.sourcePage) ? card.sourcePage : null;
+    const refParts = [section];
+    if (page) refParts.push(`page ${page}`);
+    if (DOM.revSourceRef) DOM.revSourceRef.textContent = `Evidence · ${refParts.join(' · ')}`;
+
+    const excerpt = card.excerpt || card.statement || '';
+    const answer = card.answer || '';
+    const trimmedExcerpt = excerpt.length > 160 ? `${excerpt.slice(0, 157).trimEnd()}…` : excerpt;
+    const hasMore = excerpt.length > trimmedExcerpt.length;
+
+    if (DOM.revEvidenceShort) DOM.revEvidenceShort.textContent = hasMore ? trimmedExcerpt : excerpt;
+    if (DOM.revEvidenceShort) DOM.revEvidenceShort.hidden = false;
+    if (DOM.revEvidenceFull) {
+      DOM.revEvidenceFull.textContent = excerpt;
+      DOM.revEvidenceFull.hidden = true;
+    }
+    if (DOM.revEvidenceToggle) {
+      DOM.revEvidenceToggle.hidden = !hasMore;
+      DOM.revEvidenceToggle.textContent = 'Show full excerpt';
+    }
+    State.revision.expandedEvidence = false;
+    if (!excerpt && DOM.revSourceRef) DOM.revSourceRef.textContent = `Evidence · ${refParts.join(' · ')} (excerpt unavailable)`;
+    if (!answer && DOM.revAnswerText) DOM.revAnswerText.textContent = card.statement || '';
+  }
+
+  function revealRevisionAnswer() {
+    if (State.revision.viewingPrev) return;
+    State.revision.revealed = true;
+    renderRevisionSession();
+  }
+
+  function toggleRevisionEvidence() {
+    const full = State.revision.expandedEvidence;
+    State.revision.expandedEvidence = !full;
+    if (DOM.revEvidenceShort) DOM.revEvidenceShort.hidden = !full;
+    if (DOM.revEvidenceFull) DOM.revEvidenceFull.hidden = full;
+    if (DOM.revEvidenceToggle) DOM.revEvidenceToggle.textContent = full ? 'Show full excerpt' : 'Show less';
+  }
+
+  function viewPreviousRevisionCard() {
+    const session = State.revision.session;
+    if (!session || session.cursor === 0) return;
+    State.revision.viewingPrev = true;
+    State.revision.expandedEvidence = false;
+    renderRevisionSession();
+  }
+
+  function returnToCurrentRevisionCard() {
+    State.revision.viewingPrev = false;
+    State.revision.expandedEvidence = false;
+    renderRevisionSession();
+  }
+
+  // A rating is written to storage before the queue advances, so a reload can
+  // never lose a review the learner already submitted.
+  async function rateRevision(rating) {
+    const engine = revisionEngine();
+    const session = State.revision.session;
+    if (!engine || !session || State.revision.saving || session.completed) return;
+    if (State.revision.viewingPrev) return;
+
+    const itemId = session.itemIds[session.cursor];
+    if (!itemId) return;
+
+    const now = Date.now();
+    const result = engine.rateSessionItem(session, itemId, rating, State.revision.progress, now);
+    if (result.ignored) return;
+
+    State.revision.saving = true;
+    State.revision.session = result.session;
+    State.revision.progress = result.progress;
+    State.revision.revealed = false;
+    State.revision.viewingPrev = false;
+    State.revision.expandedEvidence = false;
+
+    try {
+      if (window.OfflineStorage && window.OfflineStorage.saveRevisionProgress) {
+        const record = engine.getItemProgress(itemId, result.progress, now);
+        await window.OfflineStorage.saveRevisionProgress(record);
+      }
+      await persistRevisionSession();
+    } catch (e) {
+      showToast('This rating could not be saved on this device.');
+    } finally {
+      State.revision.saving = false;
+    }
+
+    if (State.revision.session.completed) {
+      finishRevisionSession();
+      return;
+    }
+    renderRevisionSession();
+    updateStats();
+  }
+
+  async function pauseRevisionSession() {
+    if (!State.revision.session) {
+      showRevisionPanel('dashboard');
+      renderRevisionDashboard();
+      return;
+    }
+    await persistRevisionSession();
+    State.revision.resumeCandidate = State.revision.session;
+    State.revision.revealed = false;
+    State.revision.viewingPrev = false;
+    renderRevisionDashboard();
+    showRevisionPanel('dashboard');
+    updateStats();
+    showToast('Session paused. Resume it any time from this set.');
+  }
+
+  async function finishRevisionSession() {
+    const engine = revisionEngine();
+    const session = State.revision.session;
+    if (!engine || !session) { showRevisionPanel('dashboard'); return; }
+
+    await persistRevisionSession();
+    State.revision.resumeCandidate = null;
+
+    const now = Date.now();
+    const summary = engine.getSessionSummary(session, State.revision.progress, now);
+    if (DOM.revSumReviewed) DOM.revSumReviewed.textContent = String(summary.reviewed);
+    if (DOM.revSumAgain) DOM.revSumAgain.textContent = String(summary.counts.again);
+    if (DOM.revSumHard) DOM.revSumHard.textContent = String(summary.counts.hard);
+    if (DOM.revSumGood) DOM.revSumGood.textContent = String(summary.counts.good);
+    if (DOM.revSumEasy) DOM.revSumEasy.textContent = String(summary.counts.easy);
+
+    if (DOM.revSumRemaining) {
+      DOM.revSumRemaining.textContent = summary.remainingDue > 0
+        ? `${summary.remainingDue} item${summary.remainingDue === 1 ? '' : 's'} from this session are due again now.`
+        : 'Nothing from this session is due again right now.';
+    }
+    if (DOM.revSumNext) {
+      let nextMessage = '';
+      if (summary.nextDueAt) nextMessage = `Next item returns ${formatRevisionWhen(summary.nextDueAt, now)}.`;
+      const dashStats = engine.getModuleRevisionStats(currentRevisionItems(), State.revision.progress, now);
+      if (dashStats.due > 0) {
+        nextMessage = `${dashStats.due} item${dashStats.due === 1 ? '' : 's'} in this set are still due now.`;
+      }
+      DOM.revSumNext.textContent = nextMessage;
+    }
+
+    showRevisionPanel('summary');
+    updateStats();
+  }
+
+  async function resetRevisionProgress() {
+    const mod = State.currentModule;
+    if (!mod) return;
+    const title = mod.title || 'this set';
+    if (!window.confirm(`Reset all revision progress for “${title}”? Ratings and scheduling for this set will be cleared. This cannot be undone.`)) {
+      return;
+    }
+    try {
+      if (window.OfflineStorage && window.OfflineStorage.resetRevisionProgress) {
+        await window.OfflineStorage.resetRevisionProgress(mod.id);
+      }
+      if (window.OfflineStorage && window.OfflineStorage.deleteRevisionSession) {
+        await window.OfflineStorage.deleteRevisionSession(mod.id);
+      }
+    } catch (e) {
+      showToast('Revision progress could not be cleared on this device.');
+    }
+    State.revision.progress = {};
+    State.revision.session = null;
+    State.revision.resumeCandidate = null;
+    State.revision.revealed = false;
+    State.revision.viewingPrev = false;
+    showToast('Revision progress reset for this set.');
+    renderRevisionDashboard();
+    showRevisionPanel('dashboard');
+    updateStats();
   }
 
   // ==========================================================================
@@ -1811,7 +2262,7 @@
       list = await window.OfflineStorage.getModules();
       if (window.OfflineStorage.getAttempts) attempts = await window.OfflineStorage.getAttempts();
     } catch (err) {
-      storageWarning = 'Local storage is unavailable in this browser. The bundled starter still works for this session.';
+      storageWarning = 'Local storage is unavailable in this browser, so saved sets cannot be listed.';
     }
 
     list = Array.isArray(list) ? list : [];
@@ -1828,11 +2279,7 @@
       }
     });
 
-    const displayList = [];
-    if (State.starterModule && !list.some((mod) => mod.id === State.starterModule.id)) {
-      displayList.push(State.starterModule);
-    }
-    displayList.push(...list);
+    const displayList = list.slice();
 
     if (!displayList.length) {
       DOM.libraryContainer.innerHTML = '<div class="empty-state"><strong>No study sets yet.</strong><br>Add a PDF, note photo, or pasted notes to build your first offline set.</div>';
@@ -1849,29 +2296,28 @@
       const attemptCount = countByModule[mod.id] || 0;
       const questionCount = Array.isArray(mod.questions) ? mod.questions.length : 0;
       const revisionOnly = questionCount === 0;
-      const date = mod.createdAt ? new Date(mod.createdAt).toLocaleDateString() : 'Bundled';
+      const date = mod.createdAt ? new Date(mod.createdAt).toLocaleDateString() : '';
       const safeTitle = escapeHtml(mod.title || 'Untitled set');
       const scoreline = last
         ? `Last score ${Number(last.score).toFixed(2)}/${Number(last.max).toFixed(2)} · ${attemptCount} attempt${attemptCount === 1 ? '' : 's'}`
         : (revisionOnly ? 'Revision-only set · no verified MCQs' : 'Not attempted yet');
-      const bundled = !!mod.bundled;
 
       html += `
-        <article class="library-card${bundled ? ' is-starter' : ''}${revisionOnly ? ' is-revision-only' : ''}">
+        <article class="library-card${revisionOnly ? ' is-revision-only' : ''}">
           <div class="library-card-head">
             <div class="library-file-icon">${icon('picture_as_pdf')}</div>
             <div class="library-copy">
               <div class="library-title-row">
                 <h3>${safeTitle}</h3>
-                ${bundled ? '<span class="library-badge">Starter set</span>' : (revisionOnly ? '<span class="library-badge">Revision only</span>' : '')}
+                ${revisionOnly ? '<span class="library-badge">Revision only</span>' : ''}
               </div>
               <div class="library-meta">
                 <span>${revisionOnly ? 'No verified MCQs' : `${questionCount} verified question${questionCount === 1 ? '' : 's'}`}</span>
-                <span>${escapeHtml(date)}</span>
+                ${date ? `<span>${escapeHtml(date)}</span>` : ''}
               </div>
               <div class="library-history">${icon('history')}<span>${escapeHtml(scoreline)}</span></div>
             </div>
-            ${bundled ? '' : `<button class="lib-del" type="button" data-id="${escapeHtml(mod.id)}" aria-label="Delete ${safeTitle}">${icon('delete')}</button>`}
+            <button class="lib-del" type="button" data-id="${escapeHtml(mod.id)}" aria-label="Delete ${safeTitle}">${icon('delete')}</button>
           </div>
           <div class="library-modes" role="group" aria-label="Study modes for ${safeTitle}">
             <button class="lib-mode lib-mode-practice" type="button" data-id="${escapeHtml(mod.id)}" data-action="practice" aria-label="Practice ${safeTitle}"${revisionOnly ? ' disabled aria-disabled="true"' : ''}>
@@ -1880,7 +2326,7 @@
             </button>
             <button class="lib-mode lib-mode-revision" type="button" data-id="${escapeHtml(mod.id)}" data-action="revision" aria-label="Revise ${safeTitle}">
               ${icon('style')}
-              <span class="lib-mode-copy"><b>Revision</b><small>Flashcards</small></span>
+              <span class="lib-mode-copy"><b>Revision</b><small>Adaptive recall</small></span>
             </button>
             <button class="lib-mode lib-mode-test" type="button" data-id="${escapeHtml(mod.id)}" data-action="test" aria-label="Take an exam test on ${safeTitle}"${revisionOnly ? ' disabled aria-disabled="true"' : ''}>
               ${icon('timer')}
@@ -1890,10 +2336,6 @@
         </article>
       `;
     });
-
-    if (!list.length) {
-      html += '<p class="library-hint">Your own PDFs and notes will appear here after you generate a set. The bundled starter is always available.</p>';
-    }
 
     DOM.libraryContainer.innerHTML = html;
 
@@ -1914,6 +2356,16 @@
         if (!window.confirm(`Delete “${title}” from this device?`)) return;
         try {
           await window.OfflineStorage.deleteModule(id);
+          if (State.currentModule && State.currentModule.id === id) {
+            State.currentModule = null;
+            State.revision.items = null;
+            State.revision.itemsFor = null;
+            State.revision.progress = {};
+            State.revision.session = null;
+            State.revision.resumeCandidate = null;
+            State.revision.revealed = false;
+            State.revision.viewingPrev = false;
+          }
           renderLibrary();
           showToast('Study set deleted from local storage.');
         } catch (e) {
@@ -2088,16 +2540,23 @@
 
     if (DOM.generateBtn) DOM.generateBtn.addEventListener('click', handleGenerate);
 
-    if (DOM.prevCardBtn) DOM.prevCardBtn.addEventListener('click', () => moveCard(-1));
-    if (DOM.nextCardBtn) DOM.nextCardBtn.addEventListener('click', () => moveCard(1));
-
-    if (DOM.flashcardBox) {
-      DOM.flashcardBox.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          State.cardFlipped = !State.cardFlipped;
-          renderFlashcard();
-        }
+    if (DOM.revStartBtn) DOM.revStartBtn.addEventListener('click', startRevisionSession);
+    if (DOM.revResumeBtn) DOM.revResumeBtn.addEventListener('click', resumeRevisionSession);
+    if (DOM.revResetBtn) DOM.revResetBtn.addEventListener('click', resetRevisionProgress);
+    if (DOM.revRevealBtn) DOM.revRevealBtn.addEventListener('click', revealRevisionAnswer);
+    if (DOM.revPauseBtn) DOM.revPauseBtn.addEventListener('click', pauseRevisionSession);
+    if (DOM.revPrevBtn) DOM.revPrevBtn.addEventListener('click', viewPreviousRevisionCard);
+    if (DOM.revBackBtn) DOM.revBackBtn.addEventListener('click', returnToCurrentRevisionCard);
+    if (DOM.revEvidenceToggle) DOM.revEvidenceToggle.addEventListener('click', toggleRevisionEvidence);
+    if (DOM.revSummaryDoneBtn) DOM.revSummaryDoneBtn.addEventListener('click', () => {
+      State.revision.session = null;
+      renderRevisionDashboard();
+      showRevisionPanel('dashboard');
+      updateStats();
+    });
+    if (DOM.revRatings) {
+      DOM.revRatings.querySelectorAll('[data-rating]').forEach((btn) => {
+        btn.addEventListener('click', () => rateRevision(btn.getAttribute('data-rating')));
       });
     }
 
@@ -2111,13 +2570,35 @@
     }
 
     document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
-      if (DOM.processModal && DOM.processModal.classList.contains('open')) {
-        closeProcessingDialog();
-      } else if (DOM.scoreModal && DOM.scoreModal.classList.contains('open')) {
-        closeScorecard();
-      } else if (State.navOpen) {
-        setNavOpen(false, { returnFocus: true });
+      if (e.key === 'Escape') {
+        if (DOM.processModal && DOM.processModal.classList.contains('open')) {
+          closeProcessingDialog();
+        } else if (DOM.scoreModal && DOM.scoreModal.classList.contains('open')) {
+          closeScorecard();
+        } else if (State.navOpen) {
+          setNavOpen(false, { returnFocus: true });
+        }
+        return;
+      }
+      if (State.activeMode !== 'revision') return;
+      const tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const session = State.revision.session;
+      if (!session || session.completed) return;
+      if (e.key === ' ' || e.key === 'Enter') {
+        if (!State.revision.revealed && !State.revision.viewingPrev) {
+          e.preventDefault();
+          revealRevisionAnswer();
+        }
+        return;
+      }
+      if (State.revision.revealed && !State.revision.viewingPrev) {
+        const key = (e.key || '').toLowerCase();
+        const map = { '1': 'again', '2': 'hard', '3': 'good', '4': 'easy' };
+        if (map[key]) {
+          e.preventDefault();
+          rateRevision(map[key]);
+        }
       }
     });
 
@@ -2141,7 +2622,6 @@
     registerServiceWorker();
     initEvents();
     initProcessing();
-    loadInitialModule();
     switchMode('library');
     requestPersistentStorage();
   }

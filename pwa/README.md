@@ -22,13 +22,13 @@ A fully standalone, zero-network, zero-LLM competitive exam study workspace and 
 3. **Android PWA Ready (`manifest.webmanifest` & `sw.js`):**
    - Service Worker precaches all app assets on initial load.
    - Installable on Android via Chrome/Firefox ("Add to Home Screen" / "Install App") into a full-screen standalone application.
-   - Persists all generated quiz modules and test attempts offline in **IndexedDB** (`engine/storage.js`).
+   - Persists all generated quiz modules, test attempts, background jobs, and per-module revision progress offline in **IndexedDB** (`engine/storage.js`), with a LocalStorage fallback when IndexedDB is unavailable.
 
 4. **Library-First Modes & A4 PDF Export:**
-   - **Library:** The default screen. It lists the bundled starter set and every saved set, and each card starts **Practice**, **Revision**, or **Exam Test** with one tap.
+   - **Library:** The default screen. It lists every saved set and each card starts **Practice**, **Revision**, or **Exam Test** with one tap.
    - **Practice Mode:** Instant answer feedback and source citation explanation in the page flow below the options.
    - **Exam Mode:** A start screen selects the question count and time per question, then runs a countdown for `questions × time` with answered progress, bookmarking, persistent Previous/Next/Submit controls, +2.00/−0.66 marking, automatic submission at zero, and a scorecard with correct/wrong/skipped totals, review, attempt history, and retake. Results stay hidden until submission.
-   - **Revision:** Active recall cards with tap-to-flip source citations.
+   - **Revision:** An adaptive, evidence-backed recall system. It builds prompt forms only from verified source facts (direct, cloze, entity–attribute, date/event, numeric, definition, classification, cause–effect, sequence, comparison, or a clearly labelled source-recall card), never invents content, and excludes contradictory or low-confidence OCR material. Every answer shows its source excerpt and page/section reference. Ratings (**Again**, **Hard**, **Good**, **Easy**) drive a fixed offline schedule (Again 10 minutes, Hard ~1 day then ×1.2, Good 1/3 days then ×2.2, Easy 4 days then ×2.8, minimum 1 day, capped at 365 days). Sessions default to 10 items drawn from due/weak material first, then new items, then stale long-interval items, and progress is saved the moment a rating is chosen, surviving navigation and reloads.
    - **Single-surface quiz scroll:** The question, options, and answer explanation grow together. When content exceeds the viewport, the whole quiz page scrolls while Previous/Next/Submit stay pinned at the bottom; there is no nested answer or question scroll container.
    - **Print-Ready A4 Booklet Export:** Native CSS Paged Media `@media print` generates two-column question papers and answer keys directly through Android's system print dialog.
 
@@ -66,7 +66,8 @@ studysynth-pwa/
 │   ├── jobs.js              # Job lifecycle, cancellation, checkpoints, recovery
 │   ├── pdfParser.js         # Client-side PDF text stream extractor
 │   ├── ocr.js               # Client-side local OCR engine with Otsu pre-processing
-│   └── storage.js           # IndexedDB & LocalStorage offline manager
+│   ├── revision.js          # Adaptive revision: cards, scheduling, session selection
+│   └── storage.js           # IndexedDB & LocalStorage offline manager (modules, attempts, jobs, revision)
 ├── vendor/
 │   ├── pdfjs/               # Bundled offline PDF.js runtime and worker
 │   └── tesseract/           # Offline WASM, worker, and eng.traineddata
@@ -78,7 +79,8 @@ studysynth-pwa/
 └── tests/
     ├── test_engine.js       # Node.js unit tests for deterministic generator
     ├── test_integration.js  # Integration tests for DOM bindings, SW cache, and manifest
-    └── test_processing.js   # Job lifecycle, progress, cancellation, and recovery tests
+    ├── test_processing.js   # Job lifecycle, progress, cancellation, and recovery tests
+    └── test_revision.js     # Revision cards, evidence safety, scheduling, sessions, persistence
 ```
 
 ---
@@ -88,19 +90,26 @@ studysynth-pwa/
 Run the automated test suites using Node.js:
 
 ```powershell
-# All suites: engine, integration/contracts, and processing jobs
+# All suites: engine, integration/contracts, processing jobs, and revision
 npm test --prefix pwa
 
 # Or individually
 node pwa/tests/test_engine.js
 node pwa/tests/test_integration.js
 node pwa/tests/test_processing.js
+node pwa/tests/test_revision.js
 ```
 
-All three suites execute with **0 failures and 0 errors**. `test_processing.js`
+All four suites execute with **0 failures and 0 errors**. `test_processing.js`
 covers navigation-safe continuation, accurate and indeterminate progress, stale
 worker rejection, cancellation, checkpoint persistence, resume, missing
 checkpoints, quota failure, and the guarantee that no partial module is saved.
+`test_revision.js` covers evidence-backed card construction, exclusion of
+conflicting and low-confidence OCR material, per-form validity, deterministic
+ordering, the fixed Again/Hard/Good/Easy intervals, due detection, the
+single requeue of Again cards, priority ordering, honest backfill, transparent
+dashboard and summary counts, legacy modules, per-module isolation, persistence,
+and the serializable facts that survive a save/reload round trip.
 
 ---
 

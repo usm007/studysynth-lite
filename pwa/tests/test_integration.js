@@ -37,7 +37,7 @@ console.log('[Test 2] Verifying Service Worker precache files...');
 const precachedFiles = [
   'index.html', 'styles.css', 'app.js', 'sample_data.js',
   'engine/generator.js', 'engine/analyze.js', 'engine/pdfParser.js', 'engine/ocr.js',
-  'engine/storage.js', 'engine/jobs.js', 'engine/worker.js',
+  'engine/storage.js', 'engine/revision.js', 'engine/jobs.js', 'engine/worker.js',
   'manifest.webmanifest', 'assets/logo.png', 'assets/icon-192.png', 'assets/icon-512.png',
   'assets/favicon.png', 'assets/apple-touch-icon.png',
   'assets/material/material-symbols-rounded-subset.woff2',
@@ -105,7 +105,17 @@ for (const id of ['scoreModal', 'scoreTitle', 'scoreMax', 'scoreBand', 'scoreCor
   assert(new RegExp(`id=["']${id}["']`).test(html), `Scorecard must expose #${id}`);
 }
 assert(/\+2\.00/.test(html) && /−0\.66|&minus;0\.66/.test(html), 'Scorecard copy must disclose negative marking');
-assert((html.match(/aria-label="With love, usm007"/g) || []).length >= 2, 'Credit must appear on desktop and compact layouts');
+const creditMatches = html.match(/aria-label="With love, usm007"/g) || [];
+assert.strictEqual(creditMatches.length, 1, 'Developer credit must appear exactly once, in the sidebar');
+const sidebarCreditAt = html.indexOf('aria-label="With love, usm007"');
+const railEndAt = html.indexOf('</aside>');
+assert(sidebarCreditAt > 0 && sidebarCreditAt < railEndAt, 'Developer credit must live inside the sidebar only');
+assert(!/subtle-credit/.test(html), 'Developer credit must not be repeated in the workspace views');
+assert(!/starterModule|mod_starter_spm_2026|loadInitialModule/.test(appJs), 'The Library must not preload an example module');
+assert(!/Starter set/.test(appJs), 'The Library must not label an example module as a starter set');
+assert(!/mod\.bundled/.test(appJs) && !/\.library-card\.is-starter/.test(css), 'Bundled starter presentation must be removed');
+assert(/State\.isNative[\s\S]{0,400}installBadge/.test(appJs) && /DOM\.installBadge\.hidden\s*=\s*true/.test(appJs), 'The native Android shell must hide the install badge');
+assert(/\.install-badge\[hidden\]\s*\{[^}]*display:\s*none/s.test(css), 'The install badge must honour its hidden state');
 assert(/localStorage|indexedDB/i.test(appJs), 'Exam attempts must persist locally');
 const mainActivity = fs.readFileSync(
   path.join(pwaDir, '..', 'android/app/src/main/java/com/usm007/studysynth/MainActivity.java'),
@@ -113,7 +123,7 @@ const mainActivity = fs.readFileSync(
 );
 assert(/window\.__studysynthBack/.test(appJs), 'The PWA must expose an Android hardware-back handler');
 assert(/window\.__studysynthBack/.test(mainActivity), 'The Android back dispatcher must call the PWA back handler');
-console.log('  ✓ Sidebar/Library/single-page-scroll/scorecard/credit contracts verified.');
+console.log('  ✓ Sidebar/Library/single-page-scroll/scorecard/single-credit contracts verified.');
 
 // 5. Test Engine Multilingual & Scientific Ingestion
 console.log('[Test 4] Testing source-verified Engine on Science & Tech sample...');
@@ -201,6 +211,33 @@ assert(/safe-bottom/.test(css) && /\.process-chip/.test(css), 'The shell indicat
 const switchBody = (appJs.match(/function switchMode\(mode\) \{([\s\S]*?)\n  \}/) || [])[1] || '';
 assert(!/Processing\.(cancel|dismiss)/.test(switchBody), 'Changing screens must not cancel or dismiss a job');
 console.log('  ✓ Worker isolation, single dialog, persistent indicator, recovery, and navigation contracts verified.');
+
+console.log('[Test 7] Verifying the adaptive revision engine contracts...');
+const revisionJs = fs.readFileSync(path.join(pwaDir, 'engine', 'revision.js'), 'utf-8');
+const storageJs = fs.readFileSync(path.join(pwaDir, 'engine', 'storage.js'), 'utf-8');
+assert(html.indexOf('./engine/revision.js') > 0 && html.indexOf('./engine/revision.js') < html.indexOf('./app.js'), 'The revision engine must load before the app controller');
+assert(/StudySynthRevision/.test(revisionJs) && /window\.StudySynthRevision\s*=/.test(revisionJs), 'The revision engine must expose a browser global');
+for (const id of ['revisionDashboard', 'revStartBtn', 'revStatDue', 'revStatNew', 'revStatLearning', 'revStatConsistent', 'revStatTotal',
+  'revisionSession', 'revPrompt', 'revAnswer', 'revAnswerText', 'revSourceRef', 'revEvidenceShort', 'revEvidenceFull', 'revEvidenceToggle',
+  'revRevealBtn', 'revRatings', 'revPrevBtn', 'revPauseBtn', 'revisionSummary', 'revSumReviewed', 'revSumNext', 'revResetBtn']) {
+  assert(new RegExp(`id="${id}"`).test(html), `The revision view must expose #${id}`);
+}
+assert(/data-rating="again"/.test(html) && /data-rating="hard"/.test(html) && /data-rating="good"/.test(html) && /data-rating="easy"/.test(html), 'All four recall ratings must be offered');
+assert(!/renderFlashcard|moveCard|cardFlipped/.test(appJs), 'Sequential flashcard traversal must be removed');
+assert(/buildRevisionItems/.test(appJs) && /buildSession\(/.test(appJs) && /rateSessionItem\(/.test(appJs), 'The app must use the revision engine for cards, sessions, and ratings');
+assert(/saveRevisionProgress\(/.test(appJs) && /saveRevisionSession\(/.test(appJs) && /getRevisionProgress\(/.test(appJs) && /getRevisionSession\(/.test(appJs), 'Ratings and sessions must persist through storage');
+assert(/resetRevisionProgress\(/.test(appJs) && /window\.confirm\(/.test(appJs), 'Resetting progress must require confirmation');
+assert(/isResumableSession|resumeSession\(/.test(appJs), 'A saved session must be resumable after a reload');
+assert(/function openRevision|function renderRevisionDashboard/.test(appJs) && /function rateRevision/.test(appJs), 'The revision lifecycle must be wired into the app');
+assert(/DB_VERSION\s*=\s*3/.test(storageJs) && /revisionProgress/.test(storageJs) && /revisionSessions/.test(storageJs), 'Storage must add revision stores through a version upgrade');
+assert(/deleteRevisionSession/.test(storageJs) && /resetRevisionProgress/.test(storageJs), 'Storage must expose session cleanup and progress reset');
+assert(/deleteModule[\s\S]{0,900}STORE_REVISION_PROGRESS/.test(storageJs), 'Deleting a module must remove its revision progress');
+assert(/engine\/revision\.js/.test(sw), 'The revision engine must be precached for offline use');
+assert(/CACHE_NAME\s*=\s*['"]studysynth-v2[89]['"]|CACHE_NAME\s*=\s*['"]studysynth-v[3-9]\d['"]/.test(sw), 'Adding the revision engine must bump the service worker cache version');
+assert(/\.rev-stats/.test(css) && /\.rev-card/.test(css) && /\.rev-rating-row/.test(css) && /\.rev-summary-grid/.test(css), 'The revision dashboard, card, ratings, and summary must be styled');
+assert(/body\[data-mode="revision"\]\s*\.livebar\s*\{\s*display:\s*none/.test(css), 'Revision must replace the exam analytics rail');
+assert(!/mastery\s*%/i.test(appJs) && !/mastery\s*%/i.test(html), 'Revision must not display invented mastery percentages');
+console.log('  ✓ Adaptive revision engine, persistence, UI flow, and offline contracts verified.');
 
 console.log('\n=============================================');
 console.log('ALL INTEGRATION & CONTRACT TESTS PASSED (0 ERRORS)');

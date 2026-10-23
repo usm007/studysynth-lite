@@ -39,8 +39,8 @@
         </div>
 
         <div class="set-title">
-          <b id="setTitle">10 QUESTIONS</b>
-          <span id="setTopic">SPM IAS Academy — 19 Oct 2026</span>
+          <b id="setTitle">OFFLINE LIBRARY</b>
+          <span id="setTopic">Choose a PDF or saved set</span>
         </div>
 
         <div class="progress-wrap" aria-label="Question progress">
@@ -88,7 +88,7 @@
             <span class="mode-icon ms-icon" aria-hidden="true">style</span>
             <div>
               <b>Revision</b>
-              <small>Active recall flashcards</small>
+              <small>Adaptive spaced recall</small>
             </div>
           </button>
           <button class="mode-item" data-mode="test">
@@ -110,7 +110,7 @@
         <!-- Inline Confidence Meter -->
         <div class="conf-meter">
           <div class="cm-head">
-            <span class="cm-label">Session Score</span>
+            <span class="cm-label" id="railAccLabel">Session Score</span>
             <span id="railAcc" class="cm-pct">0%</span>
           </div>
           <div class="cm-bar" aria-hidden="true"><i id="railBar" style="width:0%;"></i></div>
@@ -247,22 +247,104 @@
                   <span class="generate-label">Generate Offline Quiz &amp; Study Package</span>
                 </button>
                 <p class="generator-note">Nothing leaves this device. Generation is deterministic, so the same notes always produce the same quiz.</p>
-                <div class="credit subtle-credit" aria-label="With love, usm007">With <span class="credit-heart ms-icon" aria-hidden="true">favorite</span>, usm007</div>
               </div>
             </div>
 
-            <!-- REVISION / FLASHCARD VIEW -->
+            <!-- REVISION VIEW — adaptive, evidence-backed recall -->
             <div id="revisionView" class="view revision-view" style="display:none;">
               <div class="view-inner revision-inner">
-                <span id="flashcardCount" class="flashcard-count">Card 1 of 10</span>
-                <div id="flashcardBox" class="flashcard" role="button" tabindex="0" aria-label="Flashcard. Activate to reveal the answer.">
-                  <!-- Dynamic Flashcard Content -->
-                </div>
-                <div class="flashcard-hint">Tap the card to flip · use the buttons to move</div>
-                <div class="flashcard-actions">
-                  <button id="prevCardBtn" class="btn" type="button"><span class="ms-icon" aria-hidden="true">arrow_back</span><span>Previous Card</span></button>
-                  <button id="nextCardBtn" class="btn btn-primary" type="button"><span>Next Card</span><span class="ms-icon" aria-hidden="true">arrow_forward</span></button>
-                </div>
+
+                <p id="revisionUnavailable" class="empty-state" hidden></p>
+
+                <!-- Dashboard -->
+                <section id="revisionDashboard" class="rev-panel" hidden>
+                  <div class="rev-head">
+                    <div class="rev-head-copy">
+                      <span class="rev-kicker">Adaptive revision</span>
+                      <h2 id="revDashTitle">Revision</h2>
+                      <p id="revDashTopic" class="rev-sub">Evidence-backed recall, scheduled on this device.</p>
+                    </div>
+                    <button id="revResetBtn" class="btn btn-sm rev-reset" type="button">Reset progress</button>
+                  </div>
+
+                  <div class="rev-stats" role="list" aria-label="Revision status for this set">
+                    <div class="rev-stat" role="listitem"><b id="revStatDue">0</b><span>Due now</span></div>
+                    <div class="rev-stat" role="listitem"><b id="revStatNew">0</b><span>New</span></div>
+                    <div class="rev-stat" role="listitem"><b id="revStatLearning">0</b><span>Learning</span></div>
+                    <div class="rev-stat" role="listitem"><b id="revStatConsistent">0</b><span>Consistently recalled</span></div>
+                    <div class="rev-stat" role="listitem"><b id="revStatTotal">0</b><span>Valid items</span></div>
+                  </div>
+
+                  <p id="revDashNote" class="rev-note"></p>
+
+                  <div class="rev-dash-actions">
+                    <button id="revStartBtn" class="btn btn-primary rev-start" type="button">Start revision</button>
+                    <button id="revResumeBtn" class="btn rev-resume" type="button" hidden>Resume session</button>
+                  </div>
+                  <p class="rev-hint">Ratings are saved on this device the moment you choose them. Nothing is uploaded.</p>
+                </section>
+
+                <!-- Session -->
+                <section id="revisionSession" class="rev-panel rev-session" hidden>
+                  <div class="rev-session-head">
+                    <span id="revPos" class="rev-pos">Item 1 of 10</span>
+                    <button id="revPauseBtn" class="btn btn-sm" type="button">Pause &amp; save</button>
+                  </div>
+                  <div id="revProgress" class="rev-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Revision progress"><i id="revProgressBar"></i></div>
+
+                  <article class="rev-card">
+                    <span id="revForm" class="rev-form">Recall</span>
+                    <div id="revPrompt" class="rev-prompt" aria-live="polite"></div>
+
+                    <div id="revAnswer" class="rev-answer" hidden>
+                      <span class="rev-label">Answer</span>
+                      <p id="revAnswerText" class="rev-answer-text"></p>
+                      <div class="rev-evidence">
+                        <span id="revSourceRef" class="rev-source-ref"></span>
+                        <p id="revEvidenceShort" class="rev-evidence-text"></p>
+                        <p id="revEvidenceFull" class="rev-evidence-text rev-evidence-full" hidden></p>
+                        <button id="revEvidenceToggle" class="btn btn-sm rev-evidence-toggle" type="button" hidden>Show full excerpt</button>
+                      </div>
+                    </div>
+                  </article>
+
+                  <p id="revRecallHint" class="rev-recall-hint">Try to recall the answer before revealing it.</p>
+
+                  <div class="rev-controls">
+                    <button id="revRevealBtn" class="btn btn-primary rev-reveal" type="button">Reveal answer</button>
+                    <button id="revBackBtn" class="btn rev-back" type="button" hidden>Back to current card</button>
+                    <button id="revPrevBtn" class="btn btn-sm rev-prev" type="button" hidden>Previous card</button>
+                  </div>
+
+                  <div id="revRatings" class="rev-ratings" role="group" aria-label="How well did you recall this?" hidden>
+                    <span class="rev-ratings-label">How did you do?</span>
+                    <div class="rev-rating-row">
+                      <button class="btn rev-rate rev-rate-again" type="button" data-rating="again"><b>Again</b><small>Couldn’t recall</small></button>
+                      <button class="btn rev-rate rev-rate-hard" type="button" data-rating="hard"><b>Hard</b><small>Took effort</small></button>
+                      <button class="btn rev-rate rev-rate-good" type="button" data-rating="good"><b>Good</b><small>Recalled</small></button>
+                      <button class="btn rev-rate rev-rate-easy" type="button" data-rating="easy"><b>Easy</b><small>Instant</small></button>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- Summary -->
+                <section id="revisionSummary" class="rev-panel rev-summary" hidden>
+                  <span class="rev-kicker">Session complete</span>
+                  <h2 id="revSummaryTitle">Session complete</h2>
+                  <div class="rev-summary-grid">
+                    <div><b id="revSumReviewed">0</b><span>Reviewed</span></div>
+                    <div><b id="revSumAgain">0</b><span>Again</span></div>
+                    <div><b id="revSumHard">0</b><span>Hard</span></div>
+                    <div><b id="revSumGood">0</b><span>Good</span></div>
+                    <div><b id="revSumEasy">0</b><span>Easy</span></div>
+                  </div>
+                  <p id="revSumRemaining" class="rev-note"></p>
+                  <p id="revSumNext" class="rev-note"></p>
+                  <div class="rev-dash-actions">
+                    <button id="revSummaryDoneBtn" class="btn btn-primary" type="button">Back to revision</button>
+                  </div>
+                </section>
+
               </div>
             </div>
 
@@ -281,7 +363,6 @@
                   <button id="libraryGenerateBtn" class="btn btn-sm" type="button"><span class="ms-icon" aria-hidden="true">add</span><span>Add PDF or notes</span></button>
                 </div>
                 <div id="libraryContainer"></div>
-                <div class="credit subtle-credit" aria-label="With love, usm007">With <span class="credit-heart ms-icon" aria-hidden="true">favorite</span>, usm007</div>
               </div>
             </div>
 
@@ -403,6 +484,7 @@
   <script src="./engine/storage.js"></script>
   <script src="./engine/jobs.js"></script>
   <script src="./vendor/tesseract/tesseract.min.js"></script>
+  <script src="./engine/revision.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
