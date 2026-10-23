@@ -135,7 +135,7 @@ The current APK is a **debug build** signed with the local debug key; use your o
 release keystore before distributing it. The native build disables the service worker
 because the web payload is already packaged inside the APK, and it still makes no
 network or AI calls. A copy of the verified build is kept at
-`output/StudySynth-v1.0-debug.apk`.
+`output/StudySynth-v1.1.0-debug.apk`.
 
 ## Output contract
 
