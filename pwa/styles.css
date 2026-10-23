@@ -138,9 +138,8 @@ img { max-width: 100%; }
   user-select: none;
 }
 
-* { scrollbar-width: thin; scrollbar-color: #c2c8da transparent; }
-*::-webkit-scrollbar { width: 7px; height: 7px; }
-*::-webkit-scrollbar-thumb { background: #c2c8da; border-radius: 99px; }
+* { scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { display: none; }
 
 :focus-visible {
   outline: 3px solid rgba(57, 67, 211, .45);
@@ -966,13 +965,10 @@ body[data-mode="test"] .exam-strip { display: flex; }
 /* ==========================================================================
    GENERATOR VIEW
    ========================================================================== */
+/* Non-quiz screens scroll inside .workspace only. Nested scrollers here would
+   trap touch/wheel input and block the page from scrolling. */
 .generator-view, .library-view {
   padding: 24px;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
 }
 .view-inner { width: 100%; max-width: 760px; margin: 0 auto; }
 .view-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
@@ -1059,11 +1055,6 @@ body[data-mode="test"] .exam-strip { display: flex; }
    ========================================================================== */
 .revision-view {
   padding: 24px;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
 }
 .revision-inner {
   display: flex;

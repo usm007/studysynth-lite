@@ -275,6 +275,8 @@
 
     if (State.isNative) {
       markInstalled('On device');
+      // window.print() is a no-op inside an Android WebView.
+      if (DOM.printBtn) DOM.printBtn.hidden = true;
       if (DOM.installBadge) {
         DOM.installBadge.addEventListener('click', () => showToast('This is the installed StudySynth app. It works fully offline.'));
       }
@@ -411,8 +413,17 @@
   // ==========================================================================
   // THEME
   // ==========================================================================
+  function syncSystemBarIcons(theme) {
+    if (!State.isNative) return;
+    try {
+      const bars = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SystemBars;
+      if (bars) bars.setStyle({ style: theme === 'dark' ? 'DARK' : 'LIGHT' }).catch(() => {});
+    } catch (e) { /* older WebView or plugin unavailable */ }
+  }
+
   function applyTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
+    syncSystemBarIcons(theme);
     localStorage.setItem('studysynth_theme', theme);
     if (DOM.themeToggle) {
       DOM.themeToggle.innerHTML = icon(theme === 'dark' ? 'light_mode' : 'dark_mode');
@@ -990,6 +1001,25 @@
     DOM.scoreModal.classList.remove('open');
     if (DOM.submitBtn) DOM.submitBtn.focus();
   }
+
+  // Android hardware/gesture back: close overlays, step back to the Library,
+  // and only exit the app from the Library itself. Returns true when handled.
+  function handleAndroidBack() {
+    if (DOM.scoreModal && DOM.scoreModal.classList.contains('open')) {
+      closeScorecard();
+      return true;
+    }
+    if (State.navOpen) {
+      setNavOpen(false, { returnFocus: true });
+      return true;
+    }
+    if (State.activeMode !== 'library') {
+      switchMode('library');
+      return true;
+    }
+    return false;
+  }
+  window.__studysynthBack = handleAndroidBack;
 
   function reviewAnswers() {
     if (!State.currentModule) return;

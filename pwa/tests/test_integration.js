@@ -99,6 +99,12 @@ for (const id of ['scoreModal', 'scoreTitle', 'scoreMax', 'scoreBand', 'scoreCor
 assert(/\+2\.00/.test(html) && /−0\.66|&minus;0\.66/.test(html), 'Scorecard copy must disclose negative marking');
 assert((html.match(/aria-label="With love, usm007"/g) || []).length >= 2, 'Credit must appear on desktop and compact layouts');
 assert(/localStorage|indexedDB/i.test(appJs), 'Exam attempts must persist locally');
+const mainActivity = fs.readFileSync(
+  path.join(pwaDir, '..', 'android/app/src/main/java/com/usm007/studysynth/MainActivity.java'),
+  'utf-8'
+);
+assert(/window\.__studysynthBack/.test(appJs), 'The PWA must expose an Android hardware-back handler');
+assert(/window\.__studysynthBack/.test(mainActivity), 'The Android back dispatcher must call the PWA back handler');
 console.log('  ✓ Sidebar/Library/single-page-scroll/scorecard/credit contracts verified.');
 
 // 5. Test Engine Multilingual & Scientific Ingestion

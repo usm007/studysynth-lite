@@ -1,10 +1,10 @@
 /**
- * StudySynth - Offline Service Worker (v14)
+ * StudySynth - Offline Service Worker (v18)
  * Caches the complete local workspace so the installed app opens and works
  * without a network. All paths are scope-relative for sub-path hosting.
  */
 
-const CACHE_NAME = 'studysynth-v17';
+const CACHE_NAME = 'studysynth-v18';
 const CORE_ASSETS = [
   './',
   './?mode=standalone',
