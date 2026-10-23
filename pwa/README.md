@@ -27,12 +27,18 @@ A fully standalone, zero-network, zero-LLM competitive exam study workspace and 
 4. **Library-First Modes & A4 PDF Export:**
    - **Library:** The default screen. It lists the bundled starter set and every saved set, and each card starts **Practice**, **Revision**, or **Exam Test** with one tap.
    - **Practice Mode:** Instant answer feedback and source citation explanation in the page flow below the options.
-   - **Exam Mode:** Count-up timer, answered progress, bookmarking, persistent Previous/Next/Submit controls, +2.00/−0.66 marking, and a scorecard with correct/wrong/skipped totals, review, attempt history, and retake. Results stay hidden until submission.
+   - **Exam Mode:** A start screen selects the question count and time per question, then runs a countdown for `questions × time` with answered progress, bookmarking, persistent Previous/Next/Submit controls, +2.00/−0.66 marking, automatic submission at zero, and a scorecard with correct/wrong/skipped totals, review, attempt history, and retake. Results stay hidden until submission.
    - **Revision:** Active recall cards with tap-to-flip source citations.
    - **Single-surface quiz scroll:** The question, options, and answer explanation grow together. When content exceeds the viewport, the whole quiz page scrolls while Previous/Next/Submit stay pinned at the bottom; there is no nested answer or question scroll container.
    - **Print-Ready A4 Booklet Export:** Native CSS Paged Media `@media print` generates two-column question papers and answer keys directly through Android's system print dialog.
 
-5. **Responsive Shell & Material 3 Icons:**
+5. **Background Processing, Honest Progress & Crash Recovery:**
+   - Document imports and question generation run as app-level jobs in a background Web Worker, so moving between Library, Practice, Revision, Exam, and Generator never cancels or restarts them.
+   - One reusable dialog shows the real stage, a determinate bar only when the source supplies real measurements (PDF pages, Tesseract recognition ratio), and an explicit indeterminate state otherwise. It can be minimised to a persistent shell indicator and reopened.
+   - Source text/file and bounded page checkpoints are stored once in IndexedDB. After a tab close, app kill, or crash, the interrupted job is detected on launch and resumed from the latest valid checkpoint; a missing checkpoint is explained rather than silently retried.
+   - Cancellation stops at a safe boundary, terminates the worker, keeps the typed text and existing modules, and never saves a partial module.
+
+6. **Responsive Shell & Material 3 Icons:**
    - Docked sidebar on tablets and desktops; slide-out drawer with backdrop, Escape handling, and focus restoration on compact screens.
    - Material Symbols Rounded icon subset bundled under `assets/material/` with its Apache 2.0 license. No emoji UI icons and no remote icon font requests.
    - Safe-area padding, reduced-motion support, visible focus states, and light/dark themes.
@@ -55,6 +61,9 @@ studysynth-pwa/
 ├── manifest.webmanifest     # Android PWA install configuration
 ├── engine/
 │   ├── generator.js         # Deterministic question generator & 11-D quality validator
+│   ├── analyze.js           # Shared analysis orchestration used by the page and worker
+│   ├── worker.js            # Background generation worker
+│   ├── jobs.js              # Job lifecycle, cancellation, checkpoints, recovery
 │   ├── pdfParser.js         # Client-side PDF text stream extractor
 │   ├── ocr.js               # Client-side local OCR engine with Otsu pre-processing
 │   └── storage.js           # IndexedDB & LocalStorage offline manager
@@ -68,7 +77,8 @@ studysynth-pwa/
 │   └── material/            # Material Symbols Rounded subset + Apache 2.0 license
 └── tests/
     ├── test_engine.js       # Node.js unit tests for deterministic generator
-    └── test_integration.js  # Integration tests for DOM bindings, SW cache, and manifest
+    ├── test_integration.js  # Integration tests for DOM bindings, SW cache, and manifest
+    └── test_processing.js   # Job lifecycle, progress, cancellation, and recovery tests
 ```
 
 ---
@@ -78,14 +88,19 @@ studysynth-pwa/
 Run the automated test suites using Node.js:
 
 ```powershell
-# Unit tests for deterministic question generator
-node pwa/tests/test_engine.js
+# All suites: engine, integration/contracts, and processing jobs
+npm test --prefix pwa
 
-# Integration tests for PWA manifest, service worker cache, and DOM bindings
+# Or individually
+node pwa/tests/test_engine.js
 node pwa/tests/test_integration.js
+node pwa/tests/test_processing.js
 ```
 
-Both test suites execute with **0 failures and 0 errors**.
+All three suites execute with **0 failures and 0 errors**. `test_processing.js`
+covers navigation-safe continuation, accurate and indeterminate progress, stale
+worker rejection, cancellation, checkpoint persistence, resume, missing
+checkpoints, quota failure, and the guarantee that no partial module is saved.
 
 ---
 

@@ -81,6 +81,17 @@
     langPath: './vendor/tesseract'
   };
 
+  function abortError() {
+    const err = new Error('Processing cancelled.');
+    err.name = 'AbortError';
+    err.code = 'CANCELLED';
+    return err;
+  }
+
+  function isAborted(options) {
+    return !!(options && options.signal && options.signal.aborted);
+  }
+
   function getAvailability() {
     if (typeof Tesseract === 'undefined') {
       return {
@@ -91,13 +102,16 @@
     return { available: true, reason: '' };
   }
 
-  async function recognizeImage(imageSource, onProgress) {
+  async function recognizeImage(imageSource, onProgress, options) {
+    const opts = options || {};
     const availability = getAvailability();
     if (!availability.available) throw new Error(availability.reason);
+    if (isAborted(opts)) throw abortError();
 
-    if (onProgress) onProgress({ status: 'Preparing on-device OCR', progress: 0.05 });
+    if (onProgress) onProgress({ status: 'Preparing on-device OCR', stage: 'ocr', indeterminate: true });
 
     let worker = null;
+    let onAbort = null;
     try {
       worker = await Tesseract.createWorker('eng', 1, {
         workerPath: OCR_PATHS.workerPath,
@@ -107,26 +121,37 @@
         // cannot strip the .gz suffix and break the offline OCR fetch.
         gzip: false,
         logger: (m) => {
-          if (!onProgress || !m) return;
+          if (!onProgress || !m || isAborted(opts)) return;
           if (m.status === 'recognizing text' && typeof m.progress === 'number') {
-            onProgress({ status: 'Recognising text', progress: Math.max(0.1, m.progress) });
+            onProgress({ status: 'Recognising text', stage: 'ocr', ratio: m.progress });
           } else if (m.status === 'loading language traineddata') {
-            onProgress({ status: 'Loading offline language data', progress: 0.15 });
+            onProgress({ status: 'Loading offline language data', stage: 'ocr', indeterminate: true });
           } else if (m.status === 'initializing api') {
-            onProgress({ status: 'Starting OCR engine', progress: 0.25 });
+            onProgress({ status: 'Starting OCR engine', stage: 'ocr', indeterminate: true });
           }
         }
       });
 
+      if (isAborted(opts)) throw abortError();
+      if (opts.signal) {
+        onAbort = () => {
+          try { worker.terminate(); } catch (e) { /* already terminated */ }
+        };
+        opts.signal.addEventListener('abort', onAbort, { once: true });
+      }
+
       const res = await worker.recognize(imageSource);
+      if (isAborted(opts)) throw abortError();
       return {
         text: res.data.text || '',
         confidence: res.data.confidence || 0
       };
     } catch (err) {
+      if (isAborted(opts)) throw abortError();
       const detail = err && err.message ? err.message : String(err);
       throw new Error('On-device OCR could not run. ' + detail + ' Try a text, Markdown, or selectable PDF file instead.');
     } finally {
+      if (opts.signal && onAbort) opts.signal.removeEventListener('abort', onAbort);
       if (worker) {
         try { await worker.terminate(); } catch (e) { /* already terminated */ }
       }
@@ -136,12 +161,15 @@
   /**
    * Extracts text from an uploaded image file (PNG, JPG, WEBP, or scanned note photo)
    */
-  async function recognizeFile(file, onProgress) {
+  async function recognizeFile(file, onProgress, options) {
+    const opts = options || {};
+    if (isAborted(opts)) return Promise.reject(abortError());
     return new Promise((resolve, reject) => {
       const img = new Image();
       const url = URL.createObjectURL(file);
       img.onload = async () => {
         try {
+          if (isAborted(opts)) throw abortError();
           const sourceWidth = img.naturalWidth || img.width;
           const sourceHeight = img.naturalHeight || img.height;
           if (!sourceWidth || !sourceHeight) throw new Error('The image has no readable dimensions.');
@@ -159,7 +187,8 @@
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
           preprocessCanvas(canvas);
-          const result = await recognizeImage(canvas, onProgress);
+          if (isAborted(opts)) throw abortError();
+          const result = await recognizeImage(canvas, onProgress, opts);
           URL.revokeObjectURL(url);
           resolve(result);
         } catch (err) {

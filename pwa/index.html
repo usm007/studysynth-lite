@@ -138,6 +138,37 @@
             <!-- QUIZ VIEW -->
             <div id="quizView" class="view quiz-view">
 
+              <!-- Exam setup: shown before a timed test starts -->
+              <section id="testSetup" class="test-setup" hidden aria-labelledby="testSetupTitle">
+                <div class="test-setup-card">
+                  <span class="test-kicker">Timed evaluation</span>
+                  <h2 id="testSetupTitle">Start an exam test</h2>
+                  <p id="testSetupModule" class="test-setup-module"></p>
+                  <div class="test-setup-grid">
+                    <label class="test-field" for="testQuestionCount">
+                      <span>Number of questions</span>
+                      <select id="testQuestionCount"></select>
+                    </label>
+                    <label class="test-field" for="testSecondsPerQuestion">
+                      <span>Time per question</span>
+                      <select id="testSecondsPerQuestion">
+                        <option value="30">30 seconds</option>
+                        <option value="45">45 seconds</option>
+                        <option value="60" selected>1 minute</option>
+                        <option value="90">1 minute 30 seconds</option>
+                        <option value="120">2 minutes</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="test-setup-summary">
+                    <div><span>Total time</span><strong id="testTotalTime">10:00</strong></div>
+                    <div><span>Marking</span><strong>+2.00 / −0.66</strong></div>
+                  </div>
+                  <button id="testStartBtn" class="btn btn-primary test-start-btn" type="button">Start test</button>
+                  <p class="test-setup-note">The timer starts immediately and keeps running if you switch screens. The test submits automatically when time runs out.</p>
+                </div>
+              </section>
+
               <div class="sheet-head">
                 <div id="sheetNum" class="sheet-num">Q 01</div>
                 <div class="sheet-id">
@@ -283,7 +314,54 @@
       </aside>
 
     </div>
+
+    <!-- Background processing indicator -->
+    <button id="processChip" class="process-chip" type="button" hidden>
+      <span class="process-chip-icon" aria-hidden="true"><span class="ms-icon">progress_activity</span></span>
+      <span class="process-chip-copy">
+        <b id="processChipStage">Preparing…</b>
+        <small id="processChipMeta">On this device</small>
+      </span>
+      <span id="processChipPct" class="process-chip-pct" hidden>0%</span>
+      <span class="process-chip-open ms-icon" aria-hidden="true">open_in_full</span>
+    </button>
   </div>
+
+  <!-- Processing dialog (one reusable surface for imports and generation) -->
+  <div id="processModal" class="modal process-modal" role="dialog" aria-modal="true" aria-labelledby="processTitle" aria-describedby="processMessage">
+    <div class="modal-card process-card">
+      <div class="process-head">
+        <span class="process-kicker">On this device</span>
+        <h2 id="processTitle">Preparing your study module</h2>
+        <p id="processMessage" class="process-message">Opening your document…</p>
+        <p id="processNotice" class="process-notice" hidden></p>
+      </div>
+
+      <div class="process-progress">
+        <div id="processTrack" class="process-track" role="progressbar" aria-labelledby="processTitle" aria-valuemin="0" aria-valuemax="100">
+          <i id="processBar" class="process-bar"></i>
+        </div>
+        <div class="process-meta">
+          <span id="processCount">Working on this device</span>
+          <span id="processPct" class="process-pct" hidden>0%</span>
+        </div>
+      </div>
+
+      <ul id="processStages" class="process-stages" aria-label="Processing stages"></ul>
+      <p id="processStorage" class="process-storage" hidden></p>
+
+      <div class="process-actions">
+        <button id="processMinimizeBtn" class="btn" type="button">Continue in background</button>
+        <button id="processCancelBtn" class="btn btn-danger" type="button">Cancel processing</button>
+        <button id="processResumeBtn" class="btn btn-primary" type="button" hidden>Resume processing</button>
+        <button id="processRetryBtn" class="btn btn-primary" type="button" hidden>Try again</button>
+        <button id="processOpenBtn" class="btn btn-primary" type="button" hidden>Open study module</button>
+        <button id="processDiscardBtn" class="btn btn-danger" type="button" hidden>Discard</button>
+        <button id="processCloseBtn" class="btn" type="button" hidden>Close</button>
+      </div>
+    </div>
+  </div>
+  <div id="processLive" class="sr-only" role="status" aria-live="polite"></div>
 
   <!-- Scorecard -->
   <div id="scoreModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="scoreTitle">
@@ -319,9 +397,11 @@
   <!-- Offline Scripts -->
   <script src="./sample_data.js"></script>
   <script src="./engine/generator.js"></script>
+  <script src="./engine/analyze.js"></script>
   <script src="./engine/pdfParser.js"></script>
   <script src="./engine/ocr.js"></script>
   <script src="./engine/storage.js"></script>
+  <script src="./engine/jobs.js"></script>
   <script src="./vendor/tesseract/tesseract.min.js"></script>
   <script src="./app.js"></script>
 </body>

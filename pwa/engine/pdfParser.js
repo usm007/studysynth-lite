@@ -9,6 +9,21 @@
 
   let pdfjsPromise = null;
 
+  function abortError() {
+    const err = new Error('Processing cancelled.');
+    err.name = 'AbortError';
+    err.code = 'CANCELLED';
+    return err;
+  }
+
+  function isAborted(options) {
+    return !!(options && options.signal && options.signal.aborted);
+  }
+
+  function checkpointError(options) {
+    if (isAborted(options)) throw abortError();
+  }
+
   async function loadPdfJs() {
     if (!pdfjsPromise) {
       pdfjsPromise = import('../vendor/pdfjs/pdf.mjs').then((pdfjs) => {
@@ -26,8 +41,10 @@
    * compressed streams, object streams, Unicode maps, and multi-page files.
    * Everything stays on the device.
    */
-  async function extractWithPdfJs(arrayBuffer, onProgress) {
+  async function extractWithPdfJs(arrayBuffer, onProgress, options) {
+    const opts = options || {};
     const pdfjs = await loadPdfJs();
+    checkpointError(opts);
     const loadingTask = pdfjs.getDocument({
       data: new Uint8Array(arrayBuffer),
       isEvalSupported: false,
@@ -35,10 +52,22 @@
       disableFontFace: true
     });
     const pdf = await loadingTask.promise;
-    const pages = [];
+    checkpointError(opts);
+    const pages = (opts.initialPages || []).map((entry) => entry.text);
+    const startPage = Math.max(1, Math.min(opts.startPage || 1, pdf.numPages + 1));
+
+    if (onProgress) {
+      onProgress({
+        status: 'Reading ' + pdf.numPages + ' page' + (pdf.numPages === 1 ? '' : 's') + '…',
+        stage: 'extracting',
+        completed: startPage - 1,
+        total: pdf.numPages
+      });
+    }
 
     try {
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      for (let pageNumber = startPage; pageNumber <= pdf.numPages; pageNumber++) {
+        checkpointError(opts);
         const page = await pdf.getPage(pageNumber);
         const content = await page.getTextContent();
         let pageText = '';
@@ -58,13 +87,18 @@
 
         if (!previousWasEol) pageText += '\n';
         const cleaned = pageText.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-        if (cleaned) pages.push(`==Page ${pageNumber}==\n${cleaned}`);
+        const formatted = cleaned ? `==Page ${pageNumber}==\n${cleaned}` : null;
+        if (formatted) pages.push(formatted);
         page.cleanup();
 
         if (onProgress) {
           onProgress({
-            status: `Extracting PDF page ${pageNumber} of ${pdf.numPages}`,
-            progress: pageNumber / pdf.numPages
+            status: 'Reading page ' + pageNumber + ' of ' + pdf.numPages + '…',
+            stage: 'extracting',
+            completed: pageNumber,
+            total: pdf.numPages,
+            pageNumber: pageNumber,
+            pageText: formatted
           });
         }
       }
@@ -79,7 +113,15 @@
    * Fallback extractor for environments where the module build cannot load.
    * Parses standard PDF text markers (BT...ET, Tj, TJ).
    */
-  async function extractWithFallback(arrayBuffer) {
+  async function extractWithFallback(arrayBuffer, onProgress, options) {
+    const opts = options || {};
+    if (onProgress) {
+      onProgress({
+        status: 'Reading document pages…',
+        stage: 'extracting',
+        indeterminate: true
+      });
+    }
     const bytes = new Uint8Array(arrayBuffer);
     const textDecoder = new TextDecoder('latin1');
     const pdfRaw = textDecoder.decode(bytes);
@@ -92,6 +134,7 @@
     let match;
 
     while ((match = streamRegex.exec(pdfRaw)) !== null) {
+      checkpointError(opts);
       const streamContent = match[1];
       let extractedBlock = '';
 
@@ -106,10 +149,12 @@
           const startIndex = match.index + match[0].indexOf(streamContent);
           const rawStreamBytes = bytes.subarray(startIndex, startIndex + streamContent.length);
           const decompressed = await decompressFlate(rawStreamBytes);
+          checkpointError(opts);
           if (decompressed && decompressed.includes('BT')) {
             extractedBlock = parsePdfTextOperators(decompressed);
           }
         } catch (e) {
+          if (isAborted(opts)) throw abortError();
           // Non-critical: some streams are image data or XObjects
         }
       }
@@ -134,19 +179,23 @@
     throw new Error('No selectable text streams found in PDF. Note: Pure scanned image PDFs require OCR.');
   }
 
-  async function extractTextFromPDF(arrayBuffer, onProgress) {
+  async function extractTextFromPDF(arrayBuffer, onProgress, options) {
+    const opts = options || {};
     let primaryError = null;
     try {
-      const text = await extractWithPdfJs(arrayBuffer, onProgress);
+      const text = await extractWithPdfJs(arrayBuffer, onProgress, opts);
       if (text && text.replace(/==Page \d+==/g, '').trim().length >= 25) return text;
       primaryError = new Error('This PDF has no selectable text layer. It may be a scanned image PDF.');
     } catch (err) {
+      if (isAborted(opts) || (err && err.name === 'AbortError')) throw abortError();
       primaryError = err;
     }
 
+    checkpointError(opts);
     try {
-      return await extractWithFallback(arrayBuffer);
+      return await extractWithFallback(arrayBuffer, onProgress, opts);
     } catch (fallbackError) {
+      if (isAborted(opts) || (fallbackError && fallbackError.name === 'AbortError')) throw abortError();
       if (primaryError && /password|encrypted/i.test(primaryError.message || '')) {
         throw new Error('This PDF is password-protected. Unlock it first, then try again.');
       }
@@ -211,13 +260,14 @@
    * confident on-device OCR was. Text extracted from a selectable PDF or a
    * plain text file has no OCR confidence and is treated as confirmed.
    */
-  async function readFileContentDetailed(file, onProgress) {
+  async function readFileContentDetailed(file, onProgress, options) {
     const name = file.name || 'document.txt';
     const ext = name.split('.').pop().toLowerCase();
+    const opts = options || {};
 
     if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
       if (typeof window !== 'undefined' && window.LocalOCR) {
-        const res = await window.LocalOCR.recognizeFile(file, onProgress);
+        const res = await window.LocalOCR.recognizeFile(file, onProgress, opts);
         const confidence = Number.isFinite(res.confidence) ? res.confidence : 0;
         return {
           text: res.text || '',
@@ -231,7 +281,7 @@
 
     if (ext === 'pdf') {
       const buffer = await file.arrayBuffer();
-      const text = await extractTextFromPDF(buffer, onProgress);
+      const text = await extractTextFromPDF(buffer, onProgress, opts);
       return { text, origin: 'pdf-text', confidence: null, lowConfidence: false };
     }
 

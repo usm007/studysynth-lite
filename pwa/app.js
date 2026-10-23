@@ -29,6 +29,12 @@
     testSubmitted: false,
     testStartedAt: 0,
     timerSeconds: 0,
+    testQuestions: [],
+    testDurationSeconds: 0,
+    testRemainingSeconds: 0,
+    testEndsAt: 0,
+    testQuestionLimit: 10,
+    testSecondsPerQuestion: 60,
     timerInterval: null,
     deferredInstallPrompt: null,
     lastResult: null,
@@ -79,6 +85,12 @@
     DOM.examTimer = document.getElementById('examTimer');
     DOM.examAnswered = document.getElementById('examAnswered');
     DOM.examSubmitBtn = document.getElementById('examSubmitBtn');
+    DOM.testSetup = document.getElementById('testSetup');
+    DOM.testSetupModule = document.getElementById('testSetupModule');
+    DOM.testQuestionCount = document.getElementById('testQuestionCount');
+    DOM.testSecondsPerQuestion = document.getElementById('testSecondsPerQuestion');
+    DOM.testTotalTime = document.getElementById('testTotalTime');
+    DOM.testStartBtn = document.getElementById('testStartBtn');
     DOM.qContainer = document.getElementById('questionContainer');
     DOM.answerPanel = document.getElementById('answerPanel');
     DOM.sheetBody = document.querySelector('.sheet-body');
@@ -122,6 +134,29 @@
     DOM.scoreReviewBtn = document.getElementById('scoreReviewBtn');
     DOM.scoreRetakeBtn = document.getElementById('scoreRetakeBtn');
     DOM.scoreCloseBtn = document.getElementById('scoreCloseBtn');
+
+    DOM.processModal = document.getElementById('processModal');
+    DOM.processTitle = document.getElementById('processTitle');
+    DOM.processMessage = document.getElementById('processMessage');
+    DOM.processNotice = document.getElementById('processNotice');
+    DOM.processTrack = document.getElementById('processTrack');
+    DOM.processBar = document.getElementById('processBar');
+    DOM.processCount = document.getElementById('processCount');
+    DOM.processPct = document.getElementById('processPct');
+    DOM.processStages = document.getElementById('processStages');
+    DOM.processStorage = document.getElementById('processStorage');
+    DOM.processMinimizeBtn = document.getElementById('processMinimizeBtn');
+    DOM.processCancelBtn = document.getElementById('processCancelBtn');
+    DOM.processResumeBtn = document.getElementById('processResumeBtn');
+    DOM.processRetryBtn = document.getElementById('processRetryBtn');
+    DOM.processOpenBtn = document.getElementById('processOpenBtn');
+    DOM.processDiscardBtn = document.getElementById('processDiscardBtn');
+    DOM.processCloseBtn = document.getElementById('processCloseBtn');
+    DOM.processLive = document.getElementById('processLive');
+    DOM.processChip = document.getElementById('processChip');
+    DOM.processChipStage = document.getElementById('processChipStage');
+    DOM.processChipMeta = document.getElementById('processChipMeta');
+    DOM.processChipPct = document.getElementById('processChipPct');
   }
 
   // ==========================================================================
@@ -176,11 +211,18 @@
     return State.activeMode === 'test' ? State.testAnswers : State.practiceAnswers;
   }
 
-  function answeredCount(answers) {
-    const qList = State.currentModule && Array.isArray(State.currentModule.questions)
+  function activeQuestionList() {
+    if (State.activeMode === 'test') return State.testQuestions;
+    return State.currentModule && Array.isArray(State.currentModule.questions)
       ? State.currentModule.questions
       : [];
-    return qList.reduce((count, q) => count + (answers && answers[q.id] ? 1 : 0), 0);
+  }
+
+  function answeredCount(answers) {
+    return activeQuestionList().reduce(
+      (count, q) => count + (answers && answers[q.id] ? 1 : 0),
+      0
+    );
   }
 
   // ==========================================================================
@@ -488,19 +530,20 @@
           State.testAnswers = {};
           State.currentIndex = 0;
         }
-        startTimer(true);
       } else {
         startTimer(false);
       }
     }
     // An active exam keeps its timer and answers if the learner checks notes
     // or revision. Submitting remains the only way to end the timed session.
+    const testSetup = mode === 'test' && !State.testStarted && !State.testSubmitted;
+    updateTestScreen();
 
     if (mode === 'revision') {
       renderFlashcard();
     } else if (mode === 'library') {
       renderLibrary();
-    } else if (isQuiz) {
+    } else if (isQuiz && !testSetup) {
       renderQuestion();
       renderPalette();
       updateStats();
@@ -519,22 +562,111 @@
   }
 
   // ==========================================================================
-  // EXAM TIMER
+  // EXAM TIMER & TEST SETUP
   // ==========================================================================
+  function renderTestSetup() {
+    const mod = State.currentModule;
+    if (!DOM.testSetup || !mod) return;
+    const available = Array.isArray(mod.questions) ? mod.questions.length : 0;
+    if (DOM.testSetupModule) {
+      DOM.testSetupModule.textContent = `${mod.title || 'Untitled set'} · ${available} verified question${available === 1 ? '' : 's'} available`;
+    }
+    if (DOM.testQuestionCount) {
+      const counts = [5, 10, 15, 20, 30, 50].filter((n) => n < available);
+      counts.push(available);
+      const previous = Number(DOM.testQuestionCount.value) || State.testQuestionLimit;
+      const selected = counts.indexOf(previous) >= 0 ? previous : Math.min(10, available);
+      DOM.testQuestionCount.innerHTML = counts.map((n) =>
+        `<option value="${n}"${n === selected ? ' selected' : ''}>${n} question${n === 1 ? '' : 's'}${n === available ? ' (all)' : ''}</option>`
+      ).join('');
+      State.testQuestionLimit = selected;
+    }
+    if (DOM.testSecondsPerQuestion) {
+      const previous = Number(DOM.testSecondsPerQuestion.value);
+      if (previous) State.testSecondsPerQuestion = previous;
+      DOM.testSecondsPerQuestion.value = String(State.testSecondsPerQuestion);
+    }
+    updateTestTotalTime();
+  }
+
+  function updateTestTotalTime() {
+    const count = Number(DOM.testQuestionCount && DOM.testQuestionCount.value) || 0;
+    const seconds = Number(DOM.testSecondsPerQuestion && DOM.testSecondsPerQuestion.value) || 60;
+    if (DOM.testTotalTime) DOM.testTotalTime.textContent = formatTime(count * seconds);
+  }
+
+  function updateTestScreen() {
+    const showSetup = State.activeMode === 'test' && !State.testStarted && !State.testSubmitted;
+    document.body.setAttribute('data-test-setup', showSetup ? 'true' : 'false');
+    if (DOM.quizView) DOM.quizView.classList.toggle('is-test-setup', showSetup);
+    if (DOM.testSetup) DOM.testSetup.hidden = !showSetup;
+    if (showSetup) renderTestSetup();
+  }
+
+  function startTest() {
+    const mod = State.currentModule;
+    if (!mod || !Array.isArray(mod.questions) || !mod.questions.length) return;
+    const count = Math.min(
+      Math.max(1, Number(DOM.testQuestionCount && DOM.testQuestionCount.value) || 1),
+      mod.questions.length
+    );
+    const seconds = Math.max(10, Number(DOM.testSecondsPerQuestion && DOM.testSecondsPerQuestion.value) || 60);
+
+    State.testQuestionLimit = count;
+    State.testSecondsPerQuestion = seconds;
+    State.testQuestions = mod.questions.slice(0, count);
+    State.testAnswers = {};
+    State.testSubmitted = false;
+    State.currentIndex = 0;
+    State.testDurationSeconds = count * seconds;
+    State.testRemainingSeconds = State.testDurationSeconds;
+    State.testStarted = true;
+    State.testStartedAt = Date.now();
+    State.testEndsAt = State.testStartedAt + State.testDurationSeconds * 1000;
+    State.timerSeconds = 0;
+
+    updateTestScreen();
+    startTimer(true);
+    renderQuestion();
+    renderPalette();
+    updateStats();
+    const firstOption = DOM.qContainer && DOM.qContainer.querySelector('.opt');
+    if (firstOption) setTimeout(() => firstOption.focus(), 30);
+    showToast(`Test started: ${count} question${count === 1 ? '' : 's'} · ${formatTime(seconds)} per question.`);
+  }
+
   function startTimer(reset) {
+    const duration = Math.max(0, Number(State.testDurationSeconds) || 0);
     if (reset) {
       State.timerSeconds = 0;
       State.testStartedAt = Date.now();
+      State.testRemainingSeconds = duration;
+      State.testEndsAt = State.testStartedAt + duration * 1000;
     }
     if (!State.testStartedAt) State.testStartedAt = Date.now();
+    if (!State.testEndsAt) State.testEndsAt = State.testStartedAt + duration * 1000;
     State.testStarted = true;
-    updateTimerDisplay();
+    tickTimer(false);
 
     if (!State.timerInterval) {
-      State.timerInterval = setInterval(() => {
-        State.timerSeconds = Math.floor((Date.now() - State.testStartedAt) / 1000);
-        updateTimerDisplay();
-      }, 1000);
+      State.timerInterval = setInterval(tickTimer, 1000);
+    }
+  }
+
+  function tickTimer(autoSubmit) {
+    const duration = Math.max(0, Number(State.testDurationSeconds) || 0);
+    const endsAt = Number(State.testEndsAt) || 0;
+    const remaining = endsAt ? Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)) : duration;
+    State.testRemainingSeconds = remaining;
+    State.timerSeconds = Math.max(0, duration - remaining);
+    updateTimerDisplay();
+
+    if (remaining <= 0 && autoSubmit !== false) {
+      stopTimer();
+      if (State.testStarted && !State.testSubmitted) {
+        showToast('Time is up. Your test was submitted automatically.');
+        completeTest();
+      }
     }
   }
 
@@ -546,7 +678,12 @@
   }
 
   function updateTimerDisplay() {
-    if (DOM.examTimer) DOM.examTimer.textContent = formatTime(State.timerSeconds);
+    if (!DOM.examTimer) return;
+    const showRemaining = State.testStarted && !State.testSubmitted;
+    const seconds = showRemaining ? State.testRemainingSeconds : State.timerSeconds;
+    DOM.examTimer.textContent = formatTime(seconds);
+    const clock = DOM.examTimer.closest('.exam-clock');
+    if (clock) clock.classList.toggle('is-low', showRemaining && seconds <= 60);
   }
 
   function resetExamState() {
@@ -556,6 +693,10 @@
     State.testStartedAt = 0;
     State.timerSeconds = 0;
     State.testAnswers = {};
+    State.testQuestions = [];
+    State.testDurationSeconds = 0;
+    State.testRemainingSeconds = 0;
+    State.testEndsAt = 0;
     updateTimerDisplay();
   }
 
@@ -563,46 +704,7 @@
   // MODULE LOADING
   // ==========================================================================
   function analyzeSource(rawText, title, sourceMeta, targetCount) {
-    const E = window.StudySynthEngine;
-    const sections = E.parseRawDocument(rawText, title);
-    const extracted = E.extractSourceFacts(sections, { sourceMeta: sourceMeta });
-    const conflictResult = E.detectFactConflicts(extracted);
-    const inventory = E.buildKnowledgeInventory(sections, {
-      facts: conflictResult.facts,
-      conflicts: conflictResult.conflicts,
-      sourceMeta: sourceMeta
-    });
-    const context = {
-      sections: sections,
-      facts: conflictResult.facts,
-      conflicts: conflictResult.conflicts
-    };
-    let questions = [];
-    let generationError = null;
-    try {
-      questions = E.generateQuestionBank(inventory, Object.assign({
-        targetCount: targetCount || 15,
-        sourceMeta: sourceMeta
-      }, context));
-    } catch (err) {
-      generationError = err;
-      questions = [];
-    }
-    const generation = questions.generation || (generationError && generationError.metrics) || null;
-    const validation = E.validateQuestionBank(questions, Object.assign({
-      candidateCount: generation ? generation.totalCandidates : 0,
-      rejectionCounts: generation ? generation.rejectionCounts : {}
-    }, context));
-    return {
-      sections,
-      facts: conflictResult.facts,
-      conflicts: conflictResult.conflicts,
-      inventory,
-      questions,
-      generation,
-      generationError,
-      validation
-    };
+    return window.StudySynthAnalysis.analyzeSource(rawText, title, sourceMeta, targetCount);
   }
 
   function buildModule(rawText, title) {
@@ -675,8 +777,7 @@
   // QUESTION RENDERING
   // ==========================================================================
   function renderQuestion(preservePageScroll) {
-    if (!State.currentModule || !Array.isArray(State.currentModule.questions)) return;
-    const qList = State.currentModule.questions;
+    const qList = activeQuestionList();
     const q = qList[State.currentIndex];
     if (!q) return;
 
@@ -820,10 +921,8 @@
   // ==========================================================================
   // STATS & PALETTE
   // ==========================================================================
-  function computeScore(answers) {
-    const qList = State.currentModule && Array.isArray(State.currentModule.questions)
-      ? State.currentModule.questions
-      : [];
+  function computeScore(answers, list) {
+    const qList = list || activeQuestionList();
     const map = answers || State.testAnswers;
     let correct = 0;
     let wrong = 0;
@@ -843,14 +942,14 @@
 
   function updateExamAnswered() {
     if (!DOM.examAnswered || !State.currentModule) return;
-    const total = State.currentModule.questions.length;
+    const total = activeQuestionList().length;
     DOM.examAnswered.textContent = `${answeredCount(State.testAnswers)}/${total} answered`;
   }
 
   function updateStats() {
     if (!State.currentModule) return;
     const resultsHidden = State.activeMode === 'test' && !State.testSubmitted;
-    const total = State.currentModule.questions.length;
+    const total = activeQuestionList().length;
 
     if (resultsHidden) {
       const answered = answeredCount(State.testAnswers);
@@ -878,7 +977,7 @@
 
   function renderPalette() {
     if (!DOM.livePalette || !State.currentModule) return;
-    const qList = State.currentModule.questions;
+    const qList = activeQuestionList();
     const answers = activeAnswers();
     const showVerdicts = State.activeMode === 'test' && State.testSubmitted;
     DOM.livePalette.innerHTML = '';
@@ -913,6 +1012,34 @@
   // ==========================================================================
   // SUBMIT & SCORECARD
   // ==========================================================================
+  function completeTest() {
+    if (!State.testStarted || State.testSubmitted) return;
+
+    State.testSubmitted = true;
+    stopTimer();
+    if (State.testEndsAt) {
+      const remaining = Math.max(0, Math.ceil((State.testEndsAt - Date.now()) / 1000));
+      State.testRemainingSeconds = remaining;
+      State.timerSeconds = Math.max(0, State.testDurationSeconds - remaining);
+    } else {
+      State.timerSeconds = State.testStartedAt ? Math.floor((Date.now() - State.testStartedAt) / 1000) : 0;
+    }
+    updateTimerDisplay();
+    updateTestScreen();
+
+    if (State.activeMode === 'test') {
+      renderQuestion();
+      renderPalette();
+      updateStats();
+    }
+
+    const result = computeScore(State.testAnswers, State.testQuestions);
+    State.lastResult = result;
+    saveAttempt(result);
+
+    openScorecard(result);
+  }
+
   function submitTest() {
     if (!State.currentModule) return;
 
@@ -926,21 +1053,7 @@
       return;
     }
 
-    if (State.testSubmitted) return;
-
-    State.testSubmitted = true;
-    stopTimer();
-    State.timerSeconds = State.testStartedAt ? Math.floor((Date.now() - State.testStartedAt) / 1000) : 0;
-    updateTimerDisplay();
-    renderQuestion();
-    renderPalette();
-    updateStats();
-
-    const result = computeScore(State.testAnswers);
-    State.lastResult = result;
-    saveAttempt(result);
-
-    openScorecard(result);
+    completeTest();
   }
 
   async function saveAttempt(result) {
@@ -1005,6 +1118,10 @@
   // Android hardware/gesture back: close overlays, step back to the Library,
   // and only exit the app from the Library itself. Returns true when handled.
   function handleAndroidBack() {
+    if (DOM.processModal && DOM.processModal.classList.contains('open')) {
+      closeProcessingDialog();
+      return true;
+    }
     if (DOM.scoreModal && DOM.scoreModal.classList.contains('open')) {
       closeScorecard();
       return true;
@@ -1024,7 +1141,7 @@
   function reviewAnswers() {
     if (!State.currentModule) return;
     closeScorecard();
-    const qList = State.currentModule.questions;
+    const qList = State.testQuestions.length ? State.testQuestions : State.currentModule.questions;
     let target = qList.findIndex((q) => {
       const answer = State.testAnswers[q.id];
       return !answer || answer !== q.answer_key;
@@ -1032,27 +1149,526 @@
     if (target < 0) target = 0;
     State.currentIndex = target;
     switchMode('test');
-    renderQuestion();
-    renderPalette();
     showToast('Use the previous and next controls to review every answer.');
   }
 
   function retakeTest() {
     if (!State.currentModule) return;
-    State.testAnswers = {};
-    State.currentIndex = 0;
-    State.testSubmitted = false;
-    State.testStarted = false;
-    State.timerSeconds = 0;
-    State.testStartedAt = 0;
-    stopTimer();
     closeScorecard();
+    resetExamState();
     switchMode('test');
-    startTimer(true);
-    renderQuestion();
-    renderPalette();
-    updateStats();
-    showToast('Fresh test started. Timer reset to 00:00.');
+    if (DOM.testStartBtn) setTimeout(() => DOM.testStartBtn.focus(), 30);
+    showToast('Choose your question count and time, then start a fresh test.');
+  }
+
+  // ==========================================================================
+  // PROCESSING JOBS (background-capable)
+  // ==========================================================================
+  let Processing = null;
+  let processExpanded = true;
+  let processReturnFocus = null;
+  let processLastAnnouncement = '';
+  let processHideTimer = null;
+  let recoveryJob = null;
+  let recoveryQueue = [];
+  let completedModule = null;
+
+  function createGenerationWorker() {
+    try {
+      return new Worker(new URL('./engine/worker.js', document.baseURI), { name: 'studysynth-generator' });
+    } catch (err) {
+      console.warn('Background worker unavailable; using the on-device fallback.', err);
+      return null;
+    }
+  }
+
+  function initProcessing() {
+    if (!window.StudySynthJobs) {
+      console.warn('Processing jobs module is unavailable.');
+      return;
+    }
+    Processing = window.StudySynthJobs.createJobManager({
+      storage: window.OfflineStorage,
+      saveModule: (module) => window.OfflineStorage.saveModule(module),
+      workers: { create: createGenerationWorker },
+      analyze: (payload, hooks) => window.StudySynthAnalysis.analyzeSource(
+        payload.text,
+        payload.title,
+        payload.sourceMeta,
+        payload.targetCount,
+        hooks
+      ),
+      readFile: (file, onProgress, options) => window.OfflineDocParser.readFileContentDetailed(file, onProgress, options),
+      onUpdate: renderProcessing,
+      onSettled: handleProcessingSettled
+    });
+    bindProcessingEvents();
+    checkInterruptedJobs();
+  }
+
+  function bindProcessingEvents() {
+    if (DOM.processMinimizeBtn) DOM.processMinimizeBtn.addEventListener('click', minimizeProcessing);
+    if (DOM.processCancelBtn) {
+      DOM.processCancelBtn.addEventListener('click', () => {
+        if (!Processing) return;
+        if (!Processing.cancel()) showToast('The study module is finishing its save.');
+      });
+    }
+    if (DOM.processResumeBtn) DOM.processResumeBtn.addEventListener('click', resumeRecovery);
+    if (DOM.processRetryBtn) {
+      DOM.processRetryBtn.addEventListener('click', () => {
+        if (!Processing || !Processing.retry()) showToast('This job cannot be retried.');
+      });
+    }
+    if (DOM.processOpenBtn) DOM.processOpenBtn.addEventListener('click', openCompletedModule);
+    if (DOM.processDiscardBtn) DOM.processDiscardBtn.addEventListener('click', discardRecovery);
+    if (DOM.processCloseBtn) DOM.processCloseBtn.addEventListener('click', closeProcessingDialog);
+    if (DOM.processChip) DOM.processChip.addEventListener('click', openProcessingDialog);
+    if (DOM.processModal) DOM.processModal.addEventListener('keydown', handleProcessKeydown);
+
+    document.addEventListener('visibilitychange', () => {
+      if (!Processing || document.hidden) return;
+      // A hidden tab is best-effort only. Never cancel just because the page
+      // was hidden; reconcile the dialog with the live job when it returns.
+      Processing.refresh();
+      if (recoveryJob) paintProcessing(recoveryJob);
+    });
+  }
+
+  async function checkInterruptedJobs() {
+    if (!Processing) return;
+    try {
+      recoveryQueue = await Processing.listInterrupted();
+    } catch (err) {
+      recoveryQueue = [];
+    }
+    if (!recoveryQueue.length) return;
+    recoveryJob = recoveryQueue.shift();
+    processExpanded = true;
+    paintProcessing(recoveryJob);
+  }
+
+  function setAppInert(inert) {
+    if (!DOM.appShell) return;
+    try { DOM.appShell.inert = inert; } catch (err) { /* older WebView */ }
+    if (inert) DOM.appShell.setAttribute('aria-hidden', 'true');
+    else DOM.appShell.removeAttribute('aria-hidden');
+  }
+
+  function clearProcessingHide() {
+    if (processHideTimer) {
+      clearTimeout(processHideTimer);
+      processHideTimer = null;
+    }
+  }
+
+  function focusProcessingDialog() {
+    if (!DOM.processModal) return;
+    const preferred = [DOM.processCancelBtn, DOM.processResumeBtn, DOM.processRetryBtn, DOM.processOpenBtn, DOM.processCloseBtn, DOM.processDiscardBtn];
+    const target = preferred.find((btn) => btn && !btn.hidden && !btn.disabled);
+    if (target) {
+      setTimeout(() => target.focus(), 30);
+    } else {
+      const card = DOM.processModal.querySelector('.process-card');
+      if (card) setTimeout(() => card.focus(), 30);
+    }
+  }
+
+  function openProcessingDialog() {
+    const job = recoveryJob || (Processing && Processing.getCurrent());
+    if (!job) return;
+    clearProcessingHide();
+    processExpanded = true;
+    paintProcessing(job);
+  }
+
+  function minimizeProcessing() {
+    const job = recoveryJob || (Processing && Processing.getCurrent());
+    if (!job) return;
+    if (job.status !== 'running' && !recoveryJob) {
+      closeProcessingDialog();
+      return;
+    }
+    processExpanded = false;
+    paintProcessing(job);
+    if (job.status === 'completed') scheduleProcessingHide();
+  }
+
+  function closeProcessingDialog() {
+    if (recoveryJob) {
+      processExpanded = false;
+      paintProcessing(recoveryJob);
+      return;
+    }
+    const job = Processing && Processing.getCurrent();
+    if (job && job.status !== 'running') {
+      Processing.dismiss();
+      processExpanded = false;
+      paintProcessing(null);
+      return;
+    }
+    if (job) {
+      minimizeProcessing();
+      return;
+    }
+    processExpanded = false;
+    paintProcessing(null);
+  }
+
+  function handleProcessKeydown(event) {
+    if (!DOM.processModal) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeProcessingDialog();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const card = DOM.processModal.querySelector('.process-card');
+    if (!card) return;
+    const items = Array.prototype.slice.call(
+      card.querySelectorAll('button:not([hidden]):not([disabled])')
+    ).filter((el) => el.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function processCountText(job) {
+    const p = job.progress || {};
+    if (p.total && p.completed != null) return `${p.completed} of ${p.total} pages`;
+    if (job.status === 'completed') return 'Completed';
+    if (job.status === 'interrupted') return 'Paused';
+    if (!p.indeterminate && p.percent != null) return job.stage === 'ocr' ? 'Recognising text' : 'Working on this device';
+    return 'Working on this device';
+  }
+
+  function renderProcessStages(job) {
+    if (!DOM.processStages) return;
+    const stages = Array.isArray(job.stages) ? job.stages : [];
+    DOM.processStages.innerHTML = stages.map((stage) => {
+      const iconName = stage.state === 'done' ? 'check_circle'
+        : stage.state === 'active' ? 'progress_activity'
+          : stage.state === 'error' ? 'error' : 'radio_button_unchecked';
+      const stateText = stage.state === 'done' ? 'Completed'
+        : stage.state === 'active' ? 'In progress'
+          : stage.state === 'error' ? 'Stopped' : 'Pending';
+      return `<li class="process-stage is-${escapeHtml(stage.state)}">`
+        + `<span class="ms-icon" aria-hidden="true">${iconName}</span>`
+        + `<span>${escapeHtml(stage.label)}</span>`
+        + `<span class="process-stage-state">${stateText}</span>`
+        + '</li>';
+    }).join('');
+  }
+
+  function paintProcessing(job) {
+    const modalWasOpen = !!(DOM.processModal && DOM.processModal.classList.contains('open'));
+    const modalOpen = !!job && processExpanded && job.status !== 'cancelled';
+    const justOpened = modalOpen && !modalWasOpen;
+    if (DOM.processModal) DOM.processModal.classList.toggle('open', modalOpen);
+
+    if (justOpened) processReturnFocus = document.activeElement;
+    if (!modalOpen && modalWasOpen) {
+      const target = processReturnFocus;
+      setTimeout(() => {
+        if (!target || typeof target.focus !== 'function' || !document.contains(target)) return;
+        if (target.disabled || target.hidden || target.getClientRects().length === 0) return;
+        target.focus();
+      }, 30);
+    }
+    setAppInert(modalOpen);
+
+    if (!job) {
+      if (DOM.processChip) DOM.processChip.hidden = true;
+      setGenerateBusy(false);
+      return;
+    }
+
+    const progress = job.progress || {};
+    const determinate = !progress.indeterminate && progress.percent != null;
+    const isImport = job.type === 'import';
+    const isRecovery = job.status === 'interrupted';
+    const isDone = job.status === 'completed';
+    const isError = job.status === 'failed';
+    const countText = processCountText(job);
+
+    const title = isDone
+      ? (isImport ? 'Your document is ready' : 'Your study module is ready')
+      : isError ? 'Processing stopped'
+        : isRecovery ? 'Processing was interrupted'
+          : isImport ? 'Preparing your document' : 'Preparing your study module';
+    if (DOM.processTitle) DOM.processTitle.textContent = title;
+    if (DOM.processMessage) DOM.processMessage.textContent = job.message || 'Working on this device…';
+
+    if (DOM.processNotice) {
+      let notice = '';
+      if (job.resumed) notice = 'Resumed from the last saved step after an interruption.';
+      else if (isRecovery && job.canResume) notice = 'Resume to continue from the last saved step.';
+      else if (isRecovery && job.reason) notice = job.reason;
+      DOM.processNotice.textContent = notice;
+      DOM.processNotice.hidden = !notice;
+    }
+
+    if (DOM.processTrack) {
+      DOM.processTrack.classList.toggle('is-indeterminate', !determinate && job.status === 'running');
+      if (determinate) DOM.processTrack.setAttribute('aria-valuenow', String(progress.percent));
+      else DOM.processTrack.removeAttribute('aria-valuenow');
+      DOM.processTrack.setAttribute('aria-valuetext', determinate ? `${countText}, ${progress.percent}%` : countText);
+    }
+    if (DOM.processBar) DOM.processBar.style.width = determinate ? `${progress.percent}%` : '';
+    if (DOM.processCount) DOM.processCount.textContent = countText;
+    if (DOM.processPct) {
+      DOM.processPct.hidden = !determinate;
+      DOM.processPct.textContent = determinate ? `${progress.percent}%` : '';
+    }
+    renderProcessStages(job);
+
+    if (DOM.processStorage) {
+      const warning = job.storageWarning || '';
+      DOM.processStorage.textContent = warning;
+      DOM.processStorage.hidden = !warning;
+    }
+
+    const running = job.status === 'running';
+    if (DOM.processMinimizeBtn) DOM.processMinimizeBtn.hidden = !running;
+    if (DOM.processCancelBtn) {
+      DOM.processCancelBtn.hidden = !running;
+      DOM.processCancelBtn.disabled = !job.canCancel;
+    }
+    if (DOM.processResumeBtn) {
+      DOM.processResumeBtn.hidden = !(isRecovery && job.canResume);
+      DOM.processResumeBtn.disabled = false;
+    }
+    if (DOM.processRetryBtn) DOM.processRetryBtn.hidden = !(isError && job.canRetry);
+    if (DOM.processOpenBtn) DOM.processOpenBtn.hidden = !(isDone && !isImport && !!completedModule);
+    if (DOM.processDiscardBtn) DOM.processDiscardBtn.hidden = !isRecovery;
+    if (DOM.processCloseBtn) DOM.processCloseBtn.hidden = !(isDone || isError || isRecovery);
+
+    const announceKey = `${job.id}|${job.status}|${job.stage}`;
+    if (announceKey !== processLastAnnouncement) {
+      processLastAnnouncement = announceKey;
+      if (DOM.processLive) {
+        const normalize = (value) => String(value || '').replace(/[.\s]+$/g, '').trim();
+        const detail = normalize(job.message) === normalize(title) ? '' : (job.message || '');
+        DOM.processLive.textContent = `${title}. ${detail}`.trim();
+      }
+    }
+
+    const showChip = !processExpanded && job.status !== 'cancelled';
+    if (DOM.processChip) {
+      DOM.processChip.hidden = !showChip;
+      DOM.processChip.classList.toggle('is-done', isDone);
+      DOM.processChip.classList.toggle('is-error', isError);
+      if (showChip) {
+        const chipStage = isDone
+          ? (isImport ? 'Document ready' : 'Study module ready')
+          : isError ? 'Processing stopped'
+            : isRecovery ? 'Processing was interrupted'
+              : (job.stageLabel || 'Working');
+        const chipMeta = isRecovery ? (job.canResume ? 'Tap to resume' : 'Cannot resume')
+          : isError ? 'Tap to review'
+            : determinate ? (progress.total ? countText : `${progress.percent}% complete`)
+              : 'Working on this device';
+        if (DOM.processChipStage) DOM.processChipStage.textContent = chipStage;
+        if (DOM.processChipMeta) DOM.processChipMeta.textContent = chipMeta;
+        if (DOM.processChipPct) {
+          DOM.processChipPct.hidden = !determinate || isDone || isError;
+          DOM.processChipPct.textContent = determinate ? `${progress.percent}%` : '';
+        }
+        DOM.processChip.setAttribute('aria-label', `Open processing details. ${chipStage}. ${chipMeta}.`);
+      }
+    }
+
+    setGenerateBusy(running, job.type);
+    if (justOpened) focusProcessingDialog();
+  }
+
+  function renderProcessing(job) {
+    if (!job) {
+      if (recoveryJob) {
+        paintProcessing(recoveryJob);
+        return;
+      }
+      paintProcessing(null);
+      return;
+    }
+    recoveryJob = null;
+    paintProcessing(job);
+    if (job.status === 'completed' && !processExpanded) scheduleProcessingHide();
+  }
+
+  function scheduleProcessingHide() {
+    clearProcessingHide();
+    processHideTimer = setTimeout(() => {
+      const job = Processing && Processing.getCurrent();
+      if (job && job.status === 'completed' && !processExpanded) {
+        Processing.dismiss();
+        paintProcessing(null);
+      }
+    }, 8000);
+  }
+
+  function setGenerateBusy(busy, type) {
+    if (!DOM.generateBtn) return;
+    DOM.generateBtn.disabled = busy;
+    const label = DOM.generateBtn.querySelector('.generate-label');
+    const text = busy
+      ? (type === 'import' ? 'Processing your document…' : 'Preparing your study module…')
+      : 'Generate Offline Quiz & Study Package';
+    if (label) label.textContent = text;
+    else DOM.generateBtn.textContent = text;
+  }
+
+  function applyImportedDocument(result) {
+    completedModule = null;
+    const detailed = result.detailed || {};
+    const text = result.text || '';
+    const fileName = (result.job && result.job.title) || 'Document';
+    const title = fileName.replace(/\.[^/.]+$/, '');
+    DOM.docText.value = text;
+    DOM.docTitle.value = title;
+
+    const lowConfidence = detailed.origin === 'ocr'
+      && (!Number.isFinite(detailed.confidence) || detailed.confidence < 90);
+    State.sourceMeta = {
+      origin: detailed.origin || 'text',
+      confidence: detailed.confidence,
+      lowConfidence: lowConfidence,
+      confirmed: !lowConfidence,
+      edited: false,
+      originalText: text
+    };
+
+    if (lowConfidence) {
+      setFileStatus(`Loaded ${fileName} · OCR confidence ${Math.round(detailed.confidence)}%. Review and correct the text before generating.`, 'error');
+      showToast('Review the extracted OCR text before generating.');
+    } else {
+      setFileStatus(`Loaded ${fileName} · ${text.length.toLocaleString()} characters extracted locally.`, 'ok');
+      showToast(`Loaded ${fileName}. Review the text, then generate.`);
+    }
+  }
+
+  function handleGeneratedModule(result) {
+    const module = result.module;
+    if (!module) return;
+    completedModule = module;
+    const questionCount = Array.isArray(module.questions) ? module.questions.length : 0;
+    const unitCount = Array.isArray(module.inventory) ? module.inventory.length : 0;
+    const validation = module.validation || {};
+    const rejected = validation.rejected || 0;
+    const rejectionSummary = Object.keys(validation.rejectionCounts || {})
+      .filter((key) => Number(validation.rejectionCounts[key]) > 0)
+      .map((key) => `${key.replace(/_/g, ' ')} (${validation.rejectionCounts[key]})`)
+      .slice(0, 4)
+      .join(', ');
+
+    if (module.revisionOnly) {
+      setFileStatus('Revision only · no MCQ passed source verification. The knowledge units were saved for revision.', 'error');
+      showToast('Saved for revision only. No verified MCQs were published.');
+    } else {
+      const skipNote = rejected > 0 ? ` ${rejected} candidate${rejected === 1 ? '' : 's'} skipped.` : '';
+      const reasonNote = rejectionSummary ? ` Reasons: ${rejectionSummary}.` : '';
+      setFileStatus(`Ready · ${questionCount} verified question${questionCount === 1 ? '' : 's'} from ${unitCount} knowledge unit${unitCount === 1 ? '' : 's'} in ${module.durationMs} ms.${skipNote}${reasonNote}`, 'ok');
+      showToast(`Saved “${module.title}”. ${questionCount} verified question${questionCount === 1 ? '' : 's'} available.`);
+    }
+
+    if (State.activeMode === 'generator') {
+      setModule(module);
+      switchMode('library');
+      renderLibrary();
+    } else if (State.activeMode === 'library') {
+      renderLibrary();
+    }
+  }
+
+  function handleProcessingSettled(result) {
+    if (!result) return;
+    if (result.status === 'cancelled') {
+      processExpanded = false;
+      if (Processing) Processing.dismiss();
+      paintProcessing(null);
+      showToast('Processing cancelled. Your notes are still here.');
+      return;
+    }
+    if (result.status === 'failed') {
+      const message = (result.error && result.error.message) || 'Processing stopped.';
+      setFileStatus(message, 'error');
+      showToast(message);
+      return;
+    }
+    if (result.status === 'completed') {
+      if (result.type === 'import') applyImportedDocument(result);
+      else handleGeneratedModule(result);
+      // The completed view is painted before onSettled runs, so repaint now
+      // that the generated module is available to the dialog's open action.
+      const current = Processing && Processing.getCurrent();
+      if (current) paintProcessing(current);
+      if (!processExpanded) scheduleProcessingHide();
+    }
+  }
+
+  function openCompletedModule() {
+    if (!completedModule) {
+      closeProcessingDialog();
+      return;
+    }
+    const module = completedModule;
+    closeProcessingDialog();
+    startLibraryMode(module, module.questions && module.questions.length ? 'practice' : 'revision');
+    renderLibrary();
+  }
+
+  async function resumeRecovery() {
+    if (!recoveryJob || !Processing) return;
+    const id = recoveryJob.id;
+    clearProcessingHide();
+    processExpanded = true;
+    if (DOM.processResumeBtn) DOM.processResumeBtn.disabled = true;
+    const result = await Processing.resume(id);
+    recoveryJob = null;
+    const current = Processing.getCurrent();
+    if (current) {
+      paintProcessing(current);
+    } else if (result.job) {
+      paintProcessing(result.job);
+    } else {
+      paintProcessing(null);
+    }
+    if (!result.accepted) {
+      if (result.reason === 'missing') {
+        showToast('That saved job is no longer available.');
+        showNextRecovery();
+      } else {
+        showToast('This job could not be resumed. Add the document again to continue.');
+      }
+    }
+  }
+
+  function showNextRecovery() {
+    recoveryJob = recoveryQueue.length ? recoveryQueue.shift() : null;
+    if (recoveryJob) {
+      processExpanded = true;
+      paintProcessing(recoveryJob);
+    } else {
+      processExpanded = false;
+      paintProcessing(null);
+    }
+  }
+
+  async function discardRecovery() {
+    if (!recoveryJob || !Processing) return;
+    const id = recoveryJob.id;
+    await Processing.discard(id);
+    recoveryJob = null;
+    showNextRecovery();
+    showToast('The interrupted job was removed.');
   }
 
   // ==========================================================================
@@ -1092,122 +1708,31 @@
       }
     }
 
-    if (DOM.generateBtn) {
-      DOM.generateBtn.disabled = true;
-      const label = DOM.generateBtn.querySelector('.generate-label');
-      if (label) label.textContent = 'Generating locally…';
-      else DOM.generateBtn.textContent = 'Generating locally…';
+    if (!Processing) {
+      setFileStatus('Processing is unavailable. Reload the app and try again.', 'error');
+      showToast('Processing is unavailable in this session.');
+      return;
     }
+    if (Processing.isBusy()) {
+      processExpanded = true;
+      openProcessingDialog();
+      showToast('A study module is already being prepared.');
+      return;
+    }
+
     setFileStatus('Extracting source facts and verifying candidates…', '');
-
-    const startTime = performance.now();
-    let analyzed = null;
-    try {
-      analyzed = analyzeSource(text, title, sourceMeta, 15);
-      const durationMs = Math.max(1, Math.round(performance.now() - startTime));
-      if (!analyzed.inventory.length) {
-        throw new Error('No structured knowledge units were found. Try a longer passage with complete sentences.');
-      }
-      if (analyzed.generationError) throw analyzed.generationError;
-      if (!analyzed.validation.valid) {
-        throw new Error('Generated questions failed final source verification, so nothing was saved. Add clearer source text and try again.');
-      }
-
-      const questions = analyzed.questions;
-      const validation = analyzed.validation;
-      const rejected = validation.rejected || 0;
-      const rejectionSummary = Object.keys(validation.rejectionCounts || {})
-        .filter((key) => Number(validation.rejectionCounts[key]) > 0)
-        .map((key) => `${key.replace(/_/g, ' ')} (${validation.rejectionCounts[key]})`)
-        .slice(0, 4)
-        .join(', ');
-
-      const newMod = {
-        id: 'mod_' + Date.now(),
-        title: title,
-        createdAt: new Date().toISOString(),
-        durationMs: durationMs,
-        sectionsCount: analyzed.sections.length,
-        inventory: analyzed.inventory,
-        questions: questions,
-        validation: validation,
-        generation: analyzed.generation,
-        sourceMeta: sourceMeta ? {
-          origin: sourceMeta.origin,
-          confidence: sourceMeta.confidence,
-          lowConfidence: !!sourceMeta.lowConfidence,
-          confirmed: !!sourceMeta.confirmed,
-          edited: !!sourceMeta.edited
-        } : null
-      };
-
-      let saved = true;
-      try {
-        await window.OfflineStorage.saveModule(newMod);
-      } catch (storageErr) {
-        saved = false;
-        console.warn('Module could not be saved to the library:', storageErr);
-      }
-
-      setModule(newMod);
-      switchMode('library');
-      await renderLibrary();
-      const skipNote = rejected > 0 ? ` ${rejected} candidate${rejected === 1 ? '' : 's'} skipped.` : '';
-      const reasonNote = rejectionSummary ? ` Reasons: ${rejectionSummary}.` : '';
-      setFileStatus(`Ready · ${questions.length} verified question${questions.length === 1 ? '' : 's'} from ${analyzed.inventory.length} knowledge unit${analyzed.inventory.length === 1 ? '' : 's'} in ${durationMs} ms.${skipNote}${reasonNote}`, 'ok');
-      showToast(saved
-        ? `Saved “${title}”. ${questions.length} verified question${questions.length === 1 ? '' : 's'} available.`
-        : `Generated “${title}”, but the library could not save it.`);
-    } catch (err) {
-      if (err && err.code === 'NO_VERIFIED_QUESTIONS' && analyzed && analyzed.inventory.length) {
-        try {
-          const result = analyzed;
-          const revisionOnly = {
-            id: 'mod_' + Date.now(),
-            title: title,
-            createdAt: new Date().toISOString(),
-            durationMs: Math.max(1, Math.round(performance.now() - startTime)),
-            sectionsCount: result.sections.length,
-            inventory: result.inventory,
-            questions: [],
-            validation: result.validation,
-            generation: result.generation,
-            revisionOnly: true,
-            sourceMeta: sourceMeta ? {
-              origin: sourceMeta.origin,
-              confidence: sourceMeta.confidence,
-              lowConfidence: !!sourceMeta.lowConfidence,
-              confirmed: !!sourceMeta.confirmed,
-              edited: !!sourceMeta.edited
-            } : null
-          };
-          let saved = true;
-          try {
-            await window.OfflineStorage.saveModule(revisionOnly);
-          } catch (storageErr) {
-            saved = false;
-          }
-          setModule(revisionOnly);
-          switchMode('library');
-          await renderLibrary();
-          setFileStatus(`Revision only · no MCQ passed source verification. ${err.message}${saved ? ' The knowledge units were saved for revision.' : ' Storage was unavailable, so the revision set was not saved.'}`, 'error');
-          showToast(saved
-            ? 'Saved for revision only. No verified MCQs were published.'
-            : 'Created a revision-only set, but the library could not save it. No verified MCQs were published.');
-          return;
-        } catch (revisionErr) {
-          // Fall through to the original failure path.
-        }
-      }
-      setFileStatus(err.message || 'Generation failed.', 'error');
-      showToast(err.message || 'Generation failed.');
-    } finally {
-      if (DOM.generateBtn) {
-        DOM.generateBtn.disabled = false;
-        const label = DOM.generateBtn.querySelector('.generate-label');
-        if (label) label.textContent = 'Generate Offline Quiz & Study Package';
-        else DOM.generateBtn.textContent = 'Generate Offline Quiz & Study Package';
-      }
+    processExpanded = true;
+    completedModule = null;
+    const started = Processing.startGeneration({
+      title: title,
+      text: text,
+      sourceMeta: sourceMeta,
+      targetCount: 15
+    });
+    if (!started.accepted) {
+      processExpanded = true;
+      paintProcessing(started.job || Processing.getCurrent());
+      showToast('A study module is already being prepared.');
     }
   }
 
@@ -1409,58 +1934,31 @@
       showToast('File is too large to process safely.');
       return;
     }
+    if (!Processing) {
+      setFileStatus('Processing is unavailable. Reload the app and try again.', 'error');
+      showToast('Processing is unavailable in this session.');
+      return;
+    }
+    if (Processing.isBusy()) {
+      processExpanded = true;
+      openProcessingDialog();
+      showToast('Another document is still being processed.');
+      return;
+    }
 
     setFileStatus(`Reading ${file.name} on this device…`, '');
     showToast('Processing file offline…');
-
-    try {
-      const onProgress = (progress) => {
-        if (progress && typeof progress.progress === 'number') {
-          setFileStatus(`${progress.status || 'Recognising text'} · ${Math.round(progress.progress * 100)}%`, '');
-        }
-      };
-      const detailed = window.OfflineDocParser.readFileContentDetailed
-        ? await window.OfflineDocParser.readFileContentDetailed(file, onProgress)
-        : { text: await window.OfflineDocParser.readFileContent(file, onProgress), origin: 'text', confidence: null };
-      const text = detailed && detailed.text ? detailed.text : '';
-
-      if (!text || text.trim().length < 25) {
-        throw new Error('No readable text was found. For scanned PDFs, try a clear photo of each page instead.');
-      }
-
-      DOM.docText.value = text;
-      DOM.docTitle.value = file.name.replace(/\.[^/.]+$/, '');
-      const lowConfidence = detailed.origin === 'ocr' && (!Number.isFinite(detailed.confidence) || detailed.confidence < 90);
-      State.sourceMeta = {
-        origin: detailed.origin || 'text',
-        confidence: detailed.confidence,
-        lowConfidence: lowConfidence,
-        confirmed: !lowConfidence,
-        edited: false,
-        originalText: text
-      };
-      if (lowConfidence) {
-        const confirmed = window.confirm(
-          `On-device OCR confidence is ${Math.round(detailed.confidence)}%. ` +
-          'Review the extracted text carefully and correct any errors. ' +
-          'Do you want to use this text as-is? Choose Cancel to keep it for editing without generating yet.'
-        );
-        State.sourceMeta.confirmed = confirmed;
-        if (confirmed) {
-          setFileStatus(`Loaded ${file.name} · OCR confidence ${Math.round(detailed.confidence)}% · you confirmed the text as-is.`, 'error');
-          showToast('Low-confidence OCR loaded after confirmation. Check the text carefully.');
-        } else {
-          setFileStatus(`Loaded ${file.name} · OCR confidence ${Math.round(detailed.confidence)}%. Correct the text before generating; generation is blocked until you do.`, 'error');
-          showToast('Review and correct the OCR text before generating.');
-        }
-      } else {
-        setFileStatus(`Loaded ${file.name} · ${text.length.toLocaleString()} characters extracted locally.`, 'ok');
-        showToast(`Loaded ${file.name}.`);
-      }
-    } catch (err) {
-      const message = err && err.message ? err.message : 'This file could not be read.';
-      setFileStatus(message, 'error');
-      showToast(message);
+    processExpanded = true;
+    completedModule = null;
+    const started = Processing.startImport({
+      file: file,
+      title: file.name.replace(/\.[^/.]+$/, ''),
+      readFile: (source, onProgress, options) => window.OfflineDocParser.readFileContentDetailed(source, onProgress, options)
+    });
+    if (!started.accepted) {
+      processExpanded = true;
+      paintProcessing(started.job || Processing.getCurrent());
+      showToast('Another document is still being processed.');
     }
   }
 
@@ -1484,7 +1982,7 @@
 
     if (DOM.nextBtn) {
       DOM.nextBtn.addEventListener('click', () => {
-        const qList = State.currentModule ? State.currentModule.questions : [];
+        const qList = activeQuestionList();
         if (State.currentIndex < qList.length - 1) {
           State.currentIndex++;
           renderQuestion();
@@ -1496,10 +1994,24 @@
     if (DOM.submitBtn) DOM.submitBtn.addEventListener('click', submitTest);
     if (DOM.examSubmitBtn) DOM.examSubmitBtn.addEventListener('click', submitTest);
 
+    if (DOM.testQuestionCount) {
+      DOM.testQuestionCount.addEventListener('change', () => {
+        State.testQuestionLimit = Number(DOM.testQuestionCount.value) || State.testQuestionLimit;
+        updateTestTotalTime();
+      });
+    }
+    if (DOM.testSecondsPerQuestion) {
+      DOM.testSecondsPerQuestion.addEventListener('change', () => {
+        State.testSecondsPerQuestion = Number(DOM.testSecondsPerQuestion.value) || State.testSecondsPerQuestion;
+        updateTestTotalTime();
+      });
+    }
+    if (DOM.testStartBtn) DOM.testStartBtn.addEventListener('click', startTest);
+
     if (DOM.markBtn) {
       DOM.markBtn.addEventListener('click', () => {
         if (!State.currentModule) return;
-        const q = State.currentModule.questions[State.currentIndex];
+        const q = activeQuestionList()[State.currentIndex];
         if (!q) return;
         const nowBookmarked = window.OfflineStorage.toggleBookmark(q.id, q);
         DOM.markBtn.innerHTML = icon('star') + `<span class="bookmark-text">${nowBookmarked ? 'Bookmarked' : 'Bookmark'}</span>`;
@@ -1600,7 +2112,9 @@
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
-      if (DOM.scoreModal && DOM.scoreModal.classList.contains('open')) {
+      if (DOM.processModal && DOM.processModal.classList.contains('open')) {
+        closeProcessingDialog();
+      } else if (DOM.scoreModal && DOM.scoreModal.classList.contains('open')) {
         closeScorecard();
       } else if (State.navOpen) {
         setNavOpen(false, { returnFocus: true });
@@ -1626,6 +2140,7 @@
     initTheme();
     registerServiceWorker();
     initEvents();
+    initProcessing();
     loadInitialModule();
     switchMode('library');
     requestPersistentStorage();

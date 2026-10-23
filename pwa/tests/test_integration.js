@@ -13,6 +13,9 @@ console.log('--- Running StudySynth Lite PWA Integration & Contract Tests ---');
 const pwaDir = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(pwaDir, 'index.html'), 'utf-8');
 const appJs = fs.readFileSync(path.join(pwaDir, 'app.js'), 'utf-8');
+const jobsJs = fs.readFileSync(path.join(pwaDir, 'engine', 'jobs.js'), 'utf-8');
+const workerJs = fs.readFileSync(path.join(pwaDir, 'engine', 'worker.js'), 'utf-8');
+const analyzeJs = fs.readFileSync(path.join(pwaDir, 'engine', 'analyze.js'), 'utf-8');
 const manifest = JSON.parse(fs.readFileSync(path.join(pwaDir, 'manifest.webmanifest'), 'utf-8'));
 const sw = fs.readFileSync(path.join(pwaDir, 'sw.js'), 'utf-8');
 
@@ -33,7 +36,8 @@ console.log('  ✓ Manifest is valid for Android PWA installation.');
 console.log('[Test 2] Verifying Service Worker precache files...');
 const precachedFiles = [
   'index.html', 'styles.css', 'app.js', 'sample_data.js',
-  'engine/generator.js', 'engine/pdfParser.js', 'engine/ocr.js', 'engine/storage.js',
+  'engine/generator.js', 'engine/analyze.js', 'engine/pdfParser.js', 'engine/ocr.js',
+  'engine/storage.js', 'engine/jobs.js', 'engine/worker.js',
   'manifest.webmanifest', 'assets/logo.png', 'assets/icon-192.png', 'assets/icon-512.png',
   'assets/favicon.png', 'assets/apple-touch-icon.png',
   'assets/material/material-symbols-rounded-subset.woff2',
@@ -93,6 +97,10 @@ assert(/\.answer-panel\s*\{[^}]*overflow:\s*visible/s.test(css), 'Answer explana
 assert(/id=["']answerPanel["']/.test(html), 'Answers need a dedicated, non-scrolling explanation panel');
 assert(/\.actions\s*\{[^}]*flex:\s*none/s.test(css) && /\.actions\s*\{[^}]*position:\s*sticky/s.test(css), 'Quiz controls must stay visible while the page scrolls');
 assert(/class="exam-answered"/.test(html), 'Test mode must show answered progress');
+assert(/id=["']testSetup["']/.test(html) && /id=["']testQuestionCount["']/.test(html) && /id=["']testSecondsPerQuestion["']/.test(html) && /id=["']testStartBtn["']/.test(html), 'Test mode must expose a start screen with question count and time per question');
+assert(/function startTest\s*\(/.test(appJs) && /testDurationSeconds/.test(appJs) && /testEndsAt/.test(appJs), 'Starting a test must create a timed countdown');
+assert(/function completeTest\s*\(/.test(appJs) && /remaining <= 0/.test(appJs) && /completeTest\(\)/.test(appJs), 'The test countdown must auto-submit when time expires');
+assert(/#quizView\.is-test-setup\s*>\s*:not\(#testSetup\)/.test(css) && /body\[data-test-setup=["']true["']\]\s*\.livebar/.test(css), 'The test start screen must replace the quiz runner and analytics rail');
 for (const id of ['scoreModal', 'scoreTitle', 'scoreMax', 'scoreBand', 'scoreCorrect', 'scoreWrong', 'scoreSkipped', 'scoreTime', 'scoreReviewBtn', 'scoreRetakeBtn', 'scoreCloseBtn', 'examSubmitBtn']) {
   assert(new RegExp(`id=["']${id}["']`).test(html), `Scorecard must expose #${id}`);
 }
@@ -156,13 +164,43 @@ assert(typeof LocalOCR.recognizeImage === 'function', 'LocalOCR must export reco
 assert(typeof LocalOCR.recognizeFile === 'function', 'LocalOCR must export recognizeFile');
 assert(typeof OfflineDocParser.readFileContentDetailed === 'function', 'The file reader must expose source origin and OCR confidence');
 assert(typeof OfflineDocParser.readFileContent === 'function', 'The string file reader must remain backward compatible');
-assert(/NO_VERIFIED_QUESTIONS/.test(appJs), 'The app must distinguish verified generation from a revision-only result');
+assert(/NO_VERIFIED_QUESTIONS/.test(jobsJs), 'The job manager must distinguish verified generation from a revision-only result');
 assert(/readFileContentDetailed/.test(appJs), 'The app must use OCR confidence metadata');
 assert(/lowConfidence/.test(appJs) && /confirmed/.test(appJs), 'The app must require confirmation or correction for low-confidence OCR');
 assert(/revisionOnly/.test(appJs) && /Revision only/.test(appJs), 'The Library must mark revision-only sets');
 assert(/disabled aria-disabled/.test(appJs), 'Revision-only sets must disable Practice and Exam Test actions');
 assert(/\.lib-mode:disabled/.test(css), 'Revision-only actions must be visually disabled');
 console.log('  ✓ Local OCR, file-source metadata, low-confidence confirmation, and revision-only contracts verified.');
+
+console.log('[Test 6] Verifying background processing contracts...');
+// The dialog is a single reusable surface with an explicit minimizable shell indicator.
+['processModal', 'processTitle', 'processMessage', 'processTrack', 'processBar',
+  'processCount', 'processPct', 'processStages', 'processMinimizeBtn', 'processCancelBtn',
+  'processResumeBtn', 'processRetryBtn', 'processOpenBtn', 'processDiscardBtn',
+  'processCloseBtn', 'processChip', 'processLive'].forEach((id) => {
+  assert(new RegExp(`id="${id}"`).test(html), `index.html must contain #${id}`);
+});
+assert(/aria-modal="true"/.test(html), 'The processing dialog must be modal while expanded');
+assert(/engine\/worker\.js/.test(sw), 'The generation worker must be precached for offline use');
+assert(/engine\/analyze\.js/.test(sw), 'The shared analysis module must be precached');
+assert(/engine\/jobs\.js/.test(sw), 'The job manager must be precached');
+assert(/new URL\('\.\/engine\/worker\.js', document\.baseURI\)/.test(appJs), 'The worker must resolve relative to the app base URL');
+assert(/Worker\(/.test(appJs) && /studysynth-generator/.test(appJs), 'Generation must run in a named worker');
+assert(/importScripts\('\.\/generator\.js', '\.\/analyze\.js'\)/.test(workerJs), 'The worker must reuse the real engine and shared analysis');
+assert(/startGeneration/.test(appJs) && /startImport/.test(appJs), 'The app must start jobs through the manager');
+assert(/Processing\.isBusy\(\)/.test(appJs), 'Duplicate processing must be rejected');
+assert(!/analyzeSource\(text, title, sourceMeta, 15\)/.test(appJs), 'The page must not run generation synchronously');
+assert(/NO_VERIFIED_QUESTIONS/.test(jobsJs) && /revisionOnly/.test(jobsJs), 'The manager must preserve revision-only completion');
+assert(/checkpoint\.module/.test(jobsJs), 'A module must be checkpointed before the final write');
+assert(/SAVE_FAILED/.test(jobsJs), 'Write failures must be handled explicitly');
+assert(/visibilitychange/.test(appJs) && !/visibilitychange[\s\S]{0,400}\.cancel\(/.test(appJs), 'Becoming visible must not cancel processing');
+assert(/listInterrupted/.test(appJs) && /resumeRecovery/.test(appJs), 'Interrupted jobs must be offered for recovery');
+assert(/process-track\.is-indeterminate/.test(css), 'Indeterminate stages need a distinct visual state');
+assert(/prefers-reduced-motion: reduce/.test(css) && /\.process-track\.is-indeterminate/.test(css), 'Motion must respect reduced-motion preferences');
+assert(/safe-bottom/.test(css) && /\.process-chip/.test(css), 'The shell indicator must respect safe areas');
+const switchBody = (appJs.match(/function switchMode\(mode\) \{([\s\S]*?)\n  \}/) || [])[1] || '';
+assert(!/Processing\.(cancel|dismiss)/.test(switchBody), 'Changing screens must not cancel or dismiss a job');
+console.log('  ✓ Worker isolation, single dialog, persistent indicator, recovery, and navigation contracts verified.');
 
 console.log('\n=============================================');
 console.log('ALL INTEGRATION & CONTRACT TESTS PASSED (0 ERRORS)');
