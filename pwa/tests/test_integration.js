@@ -102,23 +102,61 @@ assert(/localStorage|indexedDB/i.test(appJs), 'Exam attempts must persist locall
 console.log('  ✓ Sidebar/Library/single-page-scroll/scorecard/credit contracts verified.');
 
 // 5. Test Engine Multilingual & Scientific Ingestion
-console.log('[Test 4] Testing Engine on Science & Tech sample...');
+console.log('[Test 4] Testing source-verified Engine on Science & Tech sample...');
 const Engine = require('../engine/generator.js');
-const SampleData = require('../sample_data.js');
+require('../sample_data.js');
 
 const sciSections = Engine.parseRawDocument(global.StudySamples.science_space, 'Chandrayaan-3');
-const sciInv = Engine.buildKnowledgeInventory(sciSections);
-const sciBank = Engine.generateQuestionBank(sciInv, { targetCount: 8 });
-const sciVal = Engine.validateQuestionBank(sciBank);
+const sciExtracted = Engine.extractSourceFacts(sciSections);
+const sciConflicts = Engine.detectFactConflicts(sciExtracted);
+const sciInv = Engine.buildKnowledgeInventory(sciSections, {
+  facts: sciConflicts.facts,
+  conflicts: sciConflicts.conflicts
+});
+const sciBank = Engine.generateQuestionBank(sciInv, {
+  targetCount: 8,
+  facts: sciConflicts.facts,
+  conflicts: sciConflicts.conflicts,
+  sections: sciSections
+});
+const sciVal = Engine.validateQuestionBank(sciBank, {
+  facts: sciConflicts.facts,
+  sections: sciSections,
+  candidateCount: sciBank.generation.totalCandidates,
+  rejectionCounts: sciBank.generation.rejectionCounts
+});
 
 assert(sciBank.length >= 5, 'Should generate at least 5 science questions');
 assert.strictEqual(sciVal.valid, true, 'Science questions should pass all validation rules');
-console.log('[Test 5] Verifying Local OCR module integration...');
+assert.strictEqual(sciVal.accepted, sciBank.length, 'Validation must accept every published science question');
+assert(sciVal.rejected >= 0, 'Validation must report rejected candidates');
+assert(sciBank.generation.factCount >= sciBank.length, 'Every question must come from the extracted fact pool');
+for (const question of sciBank) {
+  assert(['single_choice', 'multi_statement'].includes(question.type), 'Published questions must use an existing renderer contract');
+  assert(Array.isArray(question.options) && question.options.length === 4, 'Every question must have four options');
+  assert(question.options.filter((option) => option.is_correct).length === 1, 'Every question must have exactly one correct option');
+  assert(question.options.some((option) => option.key === question.answer_key && option.is_correct), 'answer_key must point to the correct option');
+  assert(question.expected_answer, 'Published questions must record the verified expected answer');
+  assert(question.evidence && question.evidence.fact_ids.length, 'Published questions must retain evidence metadata');
+  assert(question.supporting_excerpt && question.explanation.includes(question.supporting_excerpt), 'Explanations must quote the source evidence');
+}
+console.log(`  ✓ ${sciBank.length} source-verified science questions published from ${sciInv.length} knowledge units.`);
+
+console.log('[Test 5] Verifying Local OCR and detailed file metadata...');
 const LocalOCR = require('../engine/ocr.js');
+const OfflineDocParser = require('../engine/pdfParser.js');
 assert(typeof LocalOCR.preprocessCanvas === 'function', 'LocalOCR must export preprocessCanvas');
 assert(typeof LocalOCR.recognizeImage === 'function', 'LocalOCR must export recognizeImage');
 assert(typeof LocalOCR.recognizeFile === 'function', 'LocalOCR must export recognizeFile');
-console.log('  ✓ Local OCR engine exports verified successfully.');
+assert(typeof OfflineDocParser.readFileContentDetailed === 'function', 'The file reader must expose source origin and OCR confidence');
+assert(typeof OfflineDocParser.readFileContent === 'function', 'The string file reader must remain backward compatible');
+assert(/NO_VERIFIED_QUESTIONS/.test(appJs), 'The app must distinguish verified generation from a revision-only result');
+assert(/readFileContentDetailed/.test(appJs), 'The app must use OCR confidence metadata');
+assert(/lowConfidence/.test(appJs) && /confirmed/.test(appJs), 'The app must require confirmation or correction for low-confidence OCR');
+assert(/revisionOnly/.test(appJs) && /Revision only/.test(appJs), 'The Library must mark revision-only sets');
+assert(/disabled aria-disabled/.test(appJs), 'Revision-only sets must disable Practice and Exam Test actions');
+assert(/\.lib-mode:disabled/.test(css), 'Revision-only actions must be visually disabled');
+console.log('  ✓ Local OCR, file-source metadata, low-confidence confirmation, and revision-only contracts verified.');
 
 console.log('\n=============================================');
 console.log('ALL INTEGRATION & CONTRACT TESTS PASSED (0 ERRORS)');

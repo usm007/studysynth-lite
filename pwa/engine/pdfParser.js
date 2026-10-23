@@ -207,30 +207,49 @@
   }
 
   /**
-   * Unified file reader for File or Blob object (supports PDF, TXT, MD, and image photo OCR)
+   * Unified file reader that also reports where the text came from and how
+   * confident on-device OCR was. Text extracted from a selectable PDF or a
+   * plain text file has no OCR confidence and is treated as confirmed.
    */
-  async function readFileContent(file, onProgress) {
+  async function readFileContentDetailed(file, onProgress) {
     const name = file.name || 'document.txt';
     const ext = name.split('.').pop().toLowerCase();
 
     if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
       if (typeof window !== 'undefined' && window.LocalOCR) {
         const res = await window.LocalOCR.recognizeFile(file, onProgress);
-        return res.text;
-      } else {
-        throw new Error('Local OCR module is not initialized.');
+        const confidence = Number.isFinite(res.confidence) ? res.confidence : 0;
+        return {
+          text: res.text || '',
+          origin: 'ocr',
+          confidence: confidence,
+          lowConfidence: confidence < 90
+        };
       }
-    } else if (ext === 'pdf') {
-      const buffer = await file.arrayBuffer();
-      return extractTextFromPDF(buffer, onProgress);
-    } else {
-      // TXT, Markdown, CSV, JSON
-      return await file.text();
+      throw new Error('Local OCR module is not initialized.');
     }
+
+    if (ext === 'pdf') {
+      const buffer = await file.arrayBuffer();
+      const text = await extractTextFromPDF(buffer, onProgress);
+      return { text, origin: 'pdf-text', confidence: null, lowConfidence: false };
+    }
+
+    // TXT, Markdown, CSV, JSON
+    return { text: await file.text(), origin: 'text', confidence: null, lowConfidence: false };
+  }
+
+  /**
+   * Backward-compatible string reader. Existing callers keep receiving text.
+   */
+  async function readFileContent(file, onProgress) {
+    const result = await readFileContentDetailed(file, onProgress);
+    return result.text;
   }
 
   const OfflineDocParser = {
     extractTextFromPDF,
+    readFileContentDetailed,
     readFileContent
   };
 

@@ -1151,6 +1151,8 @@ body[data-mode="test"] .exam-strip { display: flex; }
   box-shadow: var(--shadow-sm);
 }
 .library-card.is-starter { border-color: var(--accent-soft); }
+.library-card.is-revision-only { border-style: dashed; }
+.library-card.is-revision-only .library-file-icon { background: var(--warn-soft, rgba(190, 130, 0, .12)); color: var(--warn); }
 .library-card-head { display: flex; align-items: flex-start; gap: 12px; }
 .library-file-icon {
   width: 42px;
@@ -1228,6 +1230,14 @@ body[data-mode="test"] .exam-strip { display: flex; }
   transition: border-color .14s var(--ease), background .14s var(--ease), transform .14s var(--ease);
 }
 .lib-mode:hover { border-color: var(--line-strong); background: var(--surface); transform: translateY(-1px); }
+.lib-mode:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+  background: var(--surface-2);
+  border-color: var(--line);
+  transform: none;
+}
+.lib-mode:disabled:hover { border-color: var(--line); background: var(--surface-2); transform: none; }
 .lib-mode .ms-icon { font-size: 19px; }
 .lib-mode-copy { min-width: 0; }
 .lib-mode-copy b { display: block; font-size: 12px; font-weight: 750; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

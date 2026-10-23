@@ -37,7 +37,8 @@
     storagePersistent: false,
     isNative: false,
     swControllerReloaded: false,
-    navOpen: false
+    navOpen: false,
+    sourceMeta: null
   };
 
   const DOM = {};
@@ -442,6 +443,13 @@
   // ==========================================================================
   function switchMode(mode) {
     if (!MODE_LABELS[mode]) mode = 'library';
+    const activeQuestionCount = State.currentModule && Array.isArray(State.currentModule.questions)
+      ? State.currentModule.questions.length
+      : 0;
+    if ((mode === 'practice' || mode === 'test') && State.currentModule && activeQuestionCount === 0) {
+      mode = 'revision';
+      showToast('This set is revision-only because no MCQs passed source verification.');
+    }
     const previousMode = State.activeMode;
     const wasNavOpen = State.navOpen;
     State.activeMode = mode;
@@ -493,7 +501,8 @@
       if (DOM.setTitle) DOM.setTitle.textContent = 'OFFLINE LIBRARY';
       if (DOM.setTopic) DOM.setTopic.textContent = 'Choose a PDF or saved set';
     } else if (State.currentModule) {
-      if (DOM.setTitle) DOM.setTitle.textContent = `${State.currentModule.questions.length} QUESTIONS`;
+      const activeCount = Array.isArray(State.currentModule.questions) ? State.currentModule.questions.length : 0;
+      if (DOM.setTitle) DOM.setTitle.textContent = activeCount ? `${activeCount} VERIFIED QUESTIONS` : 'REVISION ONLY';
       if (DOM.setTopic) DOM.setTopic.textContent = State.currentModule.title;
     }
   }
@@ -542,20 +551,62 @@
   // ==========================================================================
   // MODULE LOADING
   // ==========================================================================
+  function analyzeSource(rawText, title, sourceMeta, targetCount) {
+    const E = window.StudySynthEngine;
+    const sections = E.parseRawDocument(rawText, title);
+    const extracted = E.extractSourceFacts(sections, { sourceMeta: sourceMeta });
+    const conflictResult = E.detectFactConflicts(extracted);
+    const inventory = E.buildKnowledgeInventory(sections, {
+      facts: conflictResult.facts,
+      conflicts: conflictResult.conflicts,
+      sourceMeta: sourceMeta
+    });
+    const context = {
+      sections: sections,
+      facts: conflictResult.facts,
+      conflicts: conflictResult.conflicts
+    };
+    let questions = [];
+    let generationError = null;
+    try {
+      questions = E.generateQuestionBank(inventory, Object.assign({
+        targetCount: targetCount || 15,
+        sourceMeta: sourceMeta
+      }, context));
+    } catch (err) {
+      generationError = err;
+      questions = [];
+    }
+    const generation = questions.generation || (generationError && generationError.metrics) || null;
+    const validation = E.validateQuestionBank(questions, Object.assign({
+      candidateCount: generation ? generation.totalCandidates : 0,
+      rejectionCounts: generation ? generation.rejectionCounts : {}
+    }, context));
+    return {
+      sections,
+      facts: conflictResult.facts,
+      conflicts: conflictResult.conflicts,
+      inventory,
+      questions,
+      generation,
+      generationError,
+      validation
+    };
+  }
+
   function buildModule(rawText, title) {
-    const sections = window.StudySynthEngine.parseRawDocument(rawText, title);
-    const inventory = window.StudySynthEngine.buildKnowledgeInventory(sections);
-    const questions = window.StudySynthEngine.generateQuestionBank(inventory, { targetCount: 10 });
-    const validation = window.StudySynthEngine.validateQuestionBank(questions);
+    const analyzed = analyzeSource(rawText, title, null, 10);
+    if (analyzed.generationError) throw analyzed.generationError;
     return {
       id: 'mod_initial',
       title: title,
       createdAt: new Date().toISOString(),
       durationMs: 45,
-      sectionsCount: sections.length,
-      inventory: inventory,
-      questions: questions,
-      validation: validation
+      sectionsCount: analyzed.sections.length,
+      inventory: analyzed.inventory,
+      questions: analyzed.questions,
+      validation: analyzed.validation,
+      generation: analyzed.generation
     };
   }
 
@@ -587,12 +638,26 @@
     State.cardFlipped = false;
     State.lastResult = null;
 
-    if (DOM.setTitle) DOM.setTitle.textContent = `${mod.questions.length} QUESTIONS`;
+    const questionCount = Array.isArray(mod.questions) ? mod.questions.length : 0;
+    if (DOM.setTitle) DOM.setTitle.textContent = questionCount ? `${questionCount} VERIFIED QUESTIONS` : 'REVISION ONLY';
     if (DOM.setTopic) DOM.setTopic.textContent = mod.title;
 
     updateStats();
+    if (!questionCount) {
+      if (DOM.qContainer) {
+        DOM.qContainer.innerHTML = '<div class="empty-state"><strong>This set is revision-only.</strong><br>No question passed every source-verification check. Open Revision to study the preserved knowledge units, or add clearer source text and generate again.</div>';
+      }
+      if (DOM.answerPanel) DOM.answerPanel.innerHTML = '';
+      if (DOM.progNum) DOM.progNum.textContent = '0/0';
+      if (DOM.progBar) DOM.progBar.style.width = '0%';
+      if (DOM.progPct) DOM.progPct.textContent = '0%';
+      renderPalette();
+      renderFlashcard();
+      return;
+    }
     renderQuestion();
     renderPalette();
+    renderFlashcard();
   }
 
   // ==========================================================================
@@ -977,34 +1042,73 @@
     }
 
     const title = (DOM.docTitle.value || '').trim() || 'Custom Study Quiz';
+    const sourceMeta = State.sourceMeta;
+    if (sourceMeta && sourceMeta.origin === 'ocr' && sourceMeta.lowConfidence) {
+      if (sourceMeta.originalText && text !== String(sourceMeta.originalText).trim()) {
+        sourceMeta.confirmed = true;
+        sourceMeta.edited = true;
+      }
+      if (!sourceMeta.confirmed) {
+        const confirmNow = window.confirm(
+          `On-device OCR confidence is ${Math.round(sourceMeta.confidence || 0)}%. ` +
+          'Have you reviewed the extracted text? Choose OK to use it as-is, or Cancel to keep editing first.'
+        );
+        if (!confirmNow) {
+          setFileStatus(`On-device OCR confidence is ${Math.round(sourceMeta.confidence || 0)}%. Review and correct the extracted text, or confirm it explicitly, before generating.`, 'error');
+          showToast('Low-confidence OCR needs your review before questions can be created.');
+          return;
+        }
+        sourceMeta.confirmed = true;
+      }
+    }
+
     if (DOM.generateBtn) {
       DOM.generateBtn.disabled = true;
       const label = DOM.generateBtn.querySelector('.generate-label');
       if (label) label.textContent = 'Generating locally…';
       else DOM.generateBtn.textContent = 'Generating locally…';
     }
-    setFileStatus('Extracting knowledge units and building questions…', '');
+    setFileStatus('Extracting source facts and verifying candidates…', '');
 
     const startTime = performance.now();
+    let analyzed = null;
     try {
-      const sections = window.StudySynthEngine.parseRawDocument(text, title);
-      const inventory = window.StudySynthEngine.buildKnowledgeInventory(sections);
-      if (!inventory.length) throw new Error('No structured knowledge units were found. Try a longer passage with complete sentences.');
-
-      const questions = window.StudySynthEngine.generateQuestionBank(inventory, { targetCount: 15 });
-      if (!questions.length) throw new Error('No valid questions could be generated from this text.');
-      const validation = window.StudySynthEngine.validateQuestionBank(questions);
+      analyzed = analyzeSource(text, title, sourceMeta, 15);
       const durationMs = Math.max(1, Math.round(performance.now() - startTime));
+      if (!analyzed.inventory.length) {
+        throw new Error('No structured knowledge units were found. Try a longer passage with complete sentences.');
+      }
+      if (analyzed.generationError) throw analyzed.generationError;
+      if (!analyzed.validation.valid) {
+        throw new Error('Generated questions failed final source verification, so nothing was saved. Add clearer source text and try again.');
+      }
+
+      const questions = analyzed.questions;
+      const validation = analyzed.validation;
+      const rejected = validation.rejected || 0;
+      const rejectionSummary = Object.keys(validation.rejectionCounts || {})
+        .filter((key) => Number(validation.rejectionCounts[key]) > 0)
+        .map((key) => `${key.replace(/_/g, ' ')} (${validation.rejectionCounts[key]})`)
+        .slice(0, 4)
+        .join(', ');
 
       const newMod = {
         id: 'mod_' + Date.now(),
         title: title,
         createdAt: new Date().toISOString(),
         durationMs: durationMs,
-        sectionsCount: sections.length,
-        inventory: inventory,
+        sectionsCount: analyzed.sections.length,
+        inventory: analyzed.inventory,
         questions: questions,
-        validation: validation
+        validation: validation,
+        generation: analyzed.generation,
+        sourceMeta: sourceMeta ? {
+          origin: sourceMeta.origin,
+          confidence: sourceMeta.confidence,
+          lowConfidence: !!sourceMeta.lowConfidence,
+          confirmed: !!sourceMeta.confirmed,
+          edited: !!sourceMeta.edited
+        } : null
       };
 
       let saved = true;
@@ -1017,11 +1121,54 @@
 
       setModule(newMod);
       switchMode('library');
-      setFileStatus(`Ready · ${questions.length} questions generated in ${durationMs} ms.`, 'ok');
+      await renderLibrary();
+      const skipNote = rejected > 0 ? ` ${rejected} candidate${rejected === 1 ? '' : 's'} skipped.` : '';
+      const reasonNote = rejectionSummary ? ` Reasons: ${rejectionSummary}.` : '';
+      setFileStatus(`Ready · ${questions.length} verified question${questions.length === 1 ? '' : 's'} from ${analyzed.inventory.length} knowledge unit${analyzed.inventory.length === 1 ? '' : 's'} in ${durationMs} ms.${skipNote}${reasonNote}`, 'ok');
       showToast(saved
-        ? `Saved “${title}”. Choose Practice, Revision, or Exam Test from the Library.`
+        ? `Saved “${title}”. ${questions.length} verified question${questions.length === 1 ? '' : 's'} available.`
         : `Generated “${title}”, but the library could not save it.`);
     } catch (err) {
+      if (err && err.code === 'NO_VERIFIED_QUESTIONS' && analyzed && analyzed.inventory.length) {
+        try {
+          const result = analyzed;
+          const revisionOnly = {
+            id: 'mod_' + Date.now(),
+            title: title,
+            createdAt: new Date().toISOString(),
+            durationMs: Math.max(1, Math.round(performance.now() - startTime)),
+            sectionsCount: result.sections.length,
+            inventory: result.inventory,
+            questions: [],
+            validation: result.validation,
+            generation: result.generation,
+            revisionOnly: true,
+            sourceMeta: sourceMeta ? {
+              origin: sourceMeta.origin,
+              confidence: sourceMeta.confidence,
+              lowConfidence: !!sourceMeta.lowConfidence,
+              confirmed: !!sourceMeta.confirmed,
+              edited: !!sourceMeta.edited
+            } : null
+          };
+          let saved = true;
+          try {
+            await window.OfflineStorage.saveModule(revisionOnly);
+          } catch (storageErr) {
+            saved = false;
+          }
+          setModule(revisionOnly);
+          switchMode('library');
+          await renderLibrary();
+          setFileStatus(`Revision only · no MCQ passed source verification. ${err.message}${saved ? ' The knowledge units were saved for revision.' : ' Storage was unavailable, so the revision set was not saved.'}`, 'error');
+          showToast(saved
+            ? 'Saved for revision only. No verified MCQs were published.'
+            : 'Created a revision-only set, but the library could not save it. No verified MCQs were published.');
+          return;
+        } catch (revisionErr) {
+          // Fall through to the original failure path.
+        }
+      }
       setFileStatus(err.message || 'Generation failed.', 'error');
       showToast(err.message || 'Generation failed.');
     } finally {
@@ -1087,6 +1234,13 @@
   // ==========================================================================
   function startLibraryMode(mod, mode) {
     if (!mod) return;
+    const questionCount = Array.isArray(mod.questions) ? mod.questions.length : 0;
+    if (!questionCount && (mode === 'practice' || mode === 'test')) {
+      setModule(mod);
+      switchMode('revision');
+      showToast('This set is revision-only because no question passed source verification.');
+      return;
+    }
     setModule(mod);
     switchMode(mode);
   }
@@ -1139,24 +1293,25 @@
       const last = latestByModule[mod.id];
       const attemptCount = countByModule[mod.id] || 0;
       const questionCount = Array.isArray(mod.questions) ? mod.questions.length : 0;
+      const revisionOnly = questionCount === 0;
       const date = mod.createdAt ? new Date(mod.createdAt).toLocaleDateString() : 'Bundled';
       const safeTitle = escapeHtml(mod.title || 'Untitled set');
       const scoreline = last
         ? `Last score ${Number(last.score).toFixed(2)}/${Number(last.max).toFixed(2)} · ${attemptCount} attempt${attemptCount === 1 ? '' : 's'}`
-        : 'Not attempted yet';
+        : (revisionOnly ? 'Revision-only set · no verified MCQs' : 'Not attempted yet');
       const bundled = !!mod.bundled;
 
       html += `
-        <article class="library-card${bundled ? ' is-starter' : ''}">
+        <article class="library-card${bundled ? ' is-starter' : ''}${revisionOnly ? ' is-revision-only' : ''}">
           <div class="library-card-head">
             <div class="library-file-icon">${icon('picture_as_pdf')}</div>
             <div class="library-copy">
               <div class="library-title-row">
                 <h3>${safeTitle}</h3>
-                ${bundled ? '<span class="library-badge">Starter set</span>' : ''}
+                ${bundled ? '<span class="library-badge">Starter set</span>' : (revisionOnly ? '<span class="library-badge">Revision only</span>' : '')}
               </div>
               <div class="library-meta">
-                <span>${questionCount} question${questionCount === 1 ? '' : 's'}</span>
+                <span>${revisionOnly ? 'No verified MCQs' : `${questionCount} verified question${questionCount === 1 ? '' : 's'}`}</span>
                 <span>${escapeHtml(date)}</span>
               </div>
               <div class="library-history">${icon('history')}<span>${escapeHtml(scoreline)}</span></div>
@@ -1164,17 +1319,17 @@
             ${bundled ? '' : `<button class="lib-del" type="button" data-id="${escapeHtml(mod.id)}" aria-label="Delete ${safeTitle}">${icon('delete')}</button>`}
           </div>
           <div class="library-modes" role="group" aria-label="Study modes for ${safeTitle}">
-            <button class="lib-mode lib-mode-practice" type="button" data-id="${escapeHtml(mod.id)}" data-action="practice" aria-label="Practice ${safeTitle}">
+            <button class="lib-mode lib-mode-practice" type="button" data-id="${escapeHtml(mod.id)}" data-action="practice" aria-label="Practice ${safeTitle}"${revisionOnly ? ' disabled aria-disabled="true"' : ''}>
               ${icon('lightbulb')}
-              <span class="lib-mode-copy"><b>Practice</b><small>Feedback</small></span>
+              <span class="lib-mode-copy"><b>Practice</b><small>${revisionOnly ? 'No MCQs' : 'Feedback'}</small></span>
             </button>
             <button class="lib-mode lib-mode-revision" type="button" data-id="${escapeHtml(mod.id)}" data-action="revision" aria-label="Revise ${safeTitle}">
               ${icon('style')}
               <span class="lib-mode-copy"><b>Revision</b><small>Flashcards</small></span>
             </button>
-            <button class="lib-mode lib-mode-test" type="button" data-id="${escapeHtml(mod.id)}" data-action="test" aria-label="Take an exam test on ${safeTitle}">
+            <button class="lib-mode lib-mode-test" type="button" data-id="${escapeHtml(mod.id)}" data-action="test" aria-label="Take an exam test on ${safeTitle}"${revisionOnly ? ' disabled aria-disabled="true"' : ''}>
               ${icon('timer')}
-              <span class="lib-mode-copy"><b>Exam Test</b><small>Timed</small></span>
+              <span class="lib-mode-copy"><b>Exam Test</b><small>${revisionOnly ? 'No MCQs' : 'Timed'}</small></span>
             </button>
           </div>
         </article>
@@ -1229,11 +1384,15 @@
     showToast('Processing file offline…');
 
     try {
-      const text = await window.OfflineDocParser.readFileContent(file, (progress) => {
+      const onProgress = (progress) => {
         if (progress && typeof progress.progress === 'number') {
           setFileStatus(`${progress.status || 'Recognising text'} · ${Math.round(progress.progress * 100)}%`, '');
         }
-      });
+      };
+      const detailed = window.OfflineDocParser.readFileContentDetailed
+        ? await window.OfflineDocParser.readFileContentDetailed(file, onProgress)
+        : { text: await window.OfflineDocParser.readFileContent(file, onProgress), origin: 'text', confidence: null };
+      const text = detailed && detailed.text ? detailed.text : '';
 
       if (!text || text.trim().length < 25) {
         throw new Error('No readable text was found. For scanned PDFs, try a clear photo of each page instead.');
@@ -1241,8 +1400,33 @@
 
       DOM.docText.value = text;
       DOM.docTitle.value = file.name.replace(/\.[^/.]+$/, '');
-      setFileStatus(`Loaded ${file.name} · ${text.length.toLocaleString()} characters extracted locally.`, 'ok');
-      showToast(`Loaded ${file.name}.`);
+      const lowConfidence = detailed.origin === 'ocr' && (!Number.isFinite(detailed.confidence) || detailed.confidence < 90);
+      State.sourceMeta = {
+        origin: detailed.origin || 'text',
+        confidence: detailed.confidence,
+        lowConfidence: lowConfidence,
+        confirmed: !lowConfidence,
+        edited: false,
+        originalText: text
+      };
+      if (lowConfidence) {
+        const confirmed = window.confirm(
+          `On-device OCR confidence is ${Math.round(detailed.confidence)}%. ` +
+          'Review the extracted text carefully and correct any errors. ' +
+          'Do you want to use this text as-is? Choose Cancel to keep it for editing without generating yet.'
+        );
+        State.sourceMeta.confirmed = confirmed;
+        if (confirmed) {
+          setFileStatus(`Loaded ${file.name} · OCR confidence ${Math.round(detailed.confidence)}% · you confirmed the text as-is.`, 'error');
+          showToast('Low-confidence OCR loaded after confirmation. Check the text carefully.');
+        } else {
+          setFileStatus(`Loaded ${file.name} · OCR confidence ${Math.round(detailed.confidence)}%. Correct the text before generating; generation is blocked until you do.`, 'error');
+          showToast('Review and correct the OCR text before generating.');
+        }
+      } else {
+        setFileStatus(`Loaded ${file.name} · ${text.length.toLocaleString()} characters extracted locally.`, 'ok');
+        showToast(`Loaded ${file.name}.`);
+      }
     } catch (err) {
       const message = err && err.message ? err.message : 'This file could not be read.';
       setFileStatus(message, 'error');
@@ -1344,6 +1528,7 @@
 
     if (DOM.chipDemoSpm) {
       DOM.chipDemoSpm.addEventListener('click', () => {
+        State.sourceMeta = null;
         DOM.docText.value = window.StudySamples.newspaper_2026;
         DOM.docTitle.value = 'SPM IAS Academy — 19 Oct 2026';
         handleGenerate();
@@ -1352,6 +1537,7 @@
 
     if (DOM.chipDemoScience) {
       DOM.chipDemoScience.addEventListener('click', () => {
+        State.sourceMeta = null;
         DOM.docText.value = window.StudySamples.science_space;
         DOM.docTitle.value = 'Chandrayaan-3 Mission Notes';
         handleGenerate();

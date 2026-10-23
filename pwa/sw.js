@@ -4,7 +4,7 @@
  * without a network. All paths are scope-relative for sub-path hosting.
  */
 
-const CACHE_NAME = 'studysynth-v14';
+const CACHE_NAME = 'studysynth-v17';
 const CORE_ASSETS = [
   './',
   './?mode=standalone',
