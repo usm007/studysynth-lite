@@ -137,5 +137,5 @@ npm run android:apk
 ```
 
 The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
-A verified copy is kept at `output/StudySynth-v1.1.0-debug.apk`. It packages the same
-zero-network web payload and does not register a service worker.
+A verified copy is kept at `output/StudySynth.apk`. It packages the same zero-network
+web payload and does not register a service worker.
